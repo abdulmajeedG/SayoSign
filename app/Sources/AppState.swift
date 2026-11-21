@@ -378,6 +378,80 @@ final class AppState: ObservableObject {
         save()
     }
 
+    func performSign(app: LibraryApp, cert c: StoredCertificate, options: SayoCore.SignOptions, tweaks: [URL],
+                     progress: @escaping @MainActor (Double, String) -> Void) async throws -> SignedApp {
+        let src = appURL(app)
+        let workRoot = Paths.work.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let payload = workRoot.appendingPathComponent("Payload", isDirectory: true)
+        let appCopy = payload.appendingPathComponent(app.appFolder)
+        var opts = options
+        opts.compression = Int32(settings.compressionLevel)
+        let compression = Int32(settings.compressionLevel)
+        let appName = opts.displayName.isEmpty ? app.name : opts.displayName
+        let certName = c.nickname
+        let libID = app.id
+        let ident = try self.identity(for: c)
+        var profile: Data
+        if c.fromAppleID {
+            progress(0.02, L("Requesting profile from Apple"))
+            let wanted = opts.bundleID.isEmpty ? app.bundleID : opts.bundleID
+            let (p, finalID) = try await AppleAccount.profile(for: c, bundleID: wanted, name: appName, anisetteURL: settings.anisetteURL)
+            profile = p
+            opts.bundleID = finalID
+        } else {
+            guard let files = certificateFiles(c) else { throw SayoError(L("Certificate files are missing")) }
+            profile = files.profile
+        }
+        let finalOpts = opts
+        let profileData = profile
+        do {
+            let result: SignedApp = try await Task.detached(priority: .userInitiated) {
+                let fm = FileManager.default
+                try fm.createDirectory(at: payload, withIntermediateDirectories: true)
+                try fm.copyItem(at: src, to: appCopy)
+                var o = finalOpts
+                var temp: [URL] = []
+                for t in tweaks {
+                    if t.pathExtension.lowercased() == "deb" {
+                        let d = workRoot.appendingPathComponent("deb-\(UUID().uuidString)")
+                        temp.append(d)
+                        o.injections += try SayoCore.extractDeb(t, to: d)
+                    } else {
+                        o.injections.append(t)
+                    }
+                }
+                if !o.injections.isEmpty, let fw = Bundle.main.privateFrameworksURL?.appendingPathComponent("CydiaSubstrate.framework"),
+                   fm.fileExists(atPath: fw.path) {
+                    o.hookFramework = fw
+                }
+                try SayoCore.signApp(app: appCopy, profile: profileData, identity: ident, options: o) { f, s in
+                    Task { @MainActor in progress(f * 0.92, s) }
+                }
+                Task { @MainActor in progress(0.93, "zip") }
+                let info = NSDictionary(contentsOf: appCopy.appendingPathComponent("Info.plist")) as? [String: Any] ?? [:]
+                let finalID = info["CFBundleIdentifier"] as? String ?? ""
+                let finalVersion = info["CFBundleShortVersionString"] as? String ?? ""
+                let finalName = (info["CFBundleDisplayName"] as? String) ?? appName
+                let safe = finalName.replacingOccurrences(of: "/", with: "-")
+                let fileName = "\(safe)_\(finalVersion)_\(UUID().uuidString.prefix(6)).ipa"
+                let out = Paths.signed.appendingPathComponent(fileName)
+                for t in temp { try? fm.removeItem(at: t) }
+                try SayoCore.zip(workRoot, to: out, level: compression)
+                try? fm.removeItem(at: workRoot)
+                let size = (try? fm.attributesOfItem(atPath: out.path)[.size] as? NSNumber)?.int64Value ?? 0
+                return SignedApp(id: UUID(), libraryID: libID, name: finalName, bundleID: finalID, version: finalVersion,
+                                 certificateName: certName, signedAt: Date(), ipaFile: fileName, size: size,
+                                 tweaks: tweaks.map { $0.lastPathComponent })
+            }.value
+            signed.insert(result, at: 0)
+            save()
+            return result
+        } catch {
+            try? FileManager.default.removeItem(at: workRoot)
+            throw error
+        }
+    }
+
     func scanInbox() async {
         let fm = Paths.fm
         let docs = Paths.documents

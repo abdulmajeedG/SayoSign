@@ -69,6 +69,7 @@ struct RootView: View {
             if p == .active { Task { await state.scanInbox() } }
         }
         .task {
+            if Diagnostics.enabled { await Diagnostics.run(state) }
             await state.scanInbox()
             if state.certificates.contains(where: { $0.ocspChecked == nil || $0.ocspChecked! < Date().addingTimeInterval(-3600) }) {
                 await state.refreshAllOCSP()

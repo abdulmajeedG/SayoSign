@@ -253,10 +253,6 @@ struct SignView: View {
         progress = 0
         stage = "copy"
         defer { signing = false }
-        let src = state.appURL(app)
-        let workRoot = Paths.work.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let payload = workRoot.appendingPathComponent("Payload", isDirectory: true)
-        let appCopy = payload.appendingPathComponent(app.appFolder)
         var opts = SayoCore.SignOptions()
         opts.bundleID = bundleID.trimmingCharacters(in: .whitespaces)
         opts.displayName = name.trimmingCharacters(in: .whitespaces)
@@ -268,77 +264,15 @@ struct SignView: View {
         opts.removeWatch = removeWatch
         opts.removeURLSchemes = removeSchemes
         opts.fileSharing = fileSharing
-        opts.compression = Int32(state.settings.compressionLevel)
-        let tweakList = tweaks
-        let compression = Int32(state.settings.compressionLevel)
-        let appCopyName = app.appFolder
-        let appName = name.isEmpty ? app.name : name
-        let certName = c.nickname
-        let libID = app.id
         do {
-            let identity = try state.identity(for: c)
-            var profile: Data
-            if c.fromAppleID {
-                stage = L("Requesting profile from Apple")
-                let wanted = opts.bundleID.isEmpty ? app.bundleID : opts.bundleID
-                let (p, finalID) = try await AppleAccount.profile(for: c, bundleID: wanted, name: appName, anisetteURL: state.settings.anisetteURL)
-                profile = p
-                opts.bundleID = finalID
-            } else {
-                guard let files = state.certificateFiles(c) else { throw SayoError(L("Certificate files are missing")) }
-                profile = files.profile
+            let result = try await state.performSign(app: app, cert: c, options: opts, tweaks: tweaks) { f, s in
+                self.progress = f
+                self.stage = s
             }
-            let finalOpts = opts
-            let profileData = profile
-            let result: SignedApp = try await Task.detached(priority: .userInitiated) {
-                let fm = FileManager.default
-                try fm.createDirectory(at: payload, withIntermediateDirectories: true)
-                try fm.copyItem(at: src, to: appCopy)
-                var o = finalOpts
-                var temp: [URL] = []
-                for t in tweakList {
-                    if t.pathExtension.lowercased() == "deb" {
-                        let d = workRoot.appendingPathComponent("deb-\(UUID().uuidString)")
-                        temp.append(d)
-                        o.injections += try SayoCore.extractDeb(t, to: d)
-                    } else {
-                        o.injections.append(t)
-                    }
-                }
-                if !o.injections.isEmpty, let fw = Bundle.main.privateFrameworksURL?.appendingPathComponent("CydiaSubstrate.framework"),
-                   fm.fileExists(atPath: fw.path) {
-                    o.hookFramework = fw
-                }
-                try SayoCore.signApp(app: appCopy, profile: profileData, identity: identity, options: o) { f, s in
-                    Task { @MainActor in
-                        self.progress = f * 0.92
-                        self.stage = s
-                    }
-                }
-                Task { @MainActor in self.stage = "zip"; self.progress = 0.93 }
-                let info = NSDictionary(contentsOf: appCopy.appendingPathComponent("Info.plist")) as? [String: Any] ?? [:]
-                let finalID = info["CFBundleIdentifier"] as? String ?? ""
-                let finalVersion = info["CFBundleShortVersionString"] as? String ?? ""
-                let finalName = (info["CFBundleDisplayName"] as? String) ?? appName
-                let safe = finalName.replacingOccurrences(of: "/", with: "-")
-                let fileName = "\(safe)_\(finalVersion)_\(UUID().uuidString.prefix(6)).ipa"
-                let out = Paths.signed.appendingPathComponent(fileName)
-                for t in temp { try? fm.removeItem(at: t) }
-                try SayoCore.zip(workRoot.appendingPathComponent("Payload").deletingLastPathComponent(), to: out, level: compression)
-                try? fm.removeItem(at: workRoot)
-                let size = (try? fm.attributesOfItem(atPath: out.path)[.size] as? NSNumber)?.int64Value ?? 0
-                _ = appCopyName
-                return SignedApp(id: UUID(), libraryID: libID, name: finalName, bundleID: finalID, version: finalVersion,
-                                 certificateName: certName, signedAt: Date(), ipaFile: fileName, size: size,
-                                 tweaks: tweakList.map { $0.lastPathComponent })
-            }.value
             progress = 1
-            state.signed.insert(result, at: 0)
-            state.save()
             done = result
             state.show(LF("%@ is signed", result.name))
         } catch {
-            try? FileManager.default.removeItem(at: workRoot)
             self.error = error.localizedDescription
         }
     }
