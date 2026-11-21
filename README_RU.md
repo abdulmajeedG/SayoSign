@@ -66,6 +66,10 @@ make
 
 Добавь `https://murk-sus.github.io/SayoSign/source.json` в AltStore, SideStore, Feather или в сам SayoSign.
 
+## 🔍 Ещё
+
+[IPALens](https://murk-sus.github.io/IPALens/?lang=ru) — проверка IPA, .p12, профиля или .deb прямо в браузере: расшифрован ли, есть ли UDID в профиле, подходит ли p12 к профилю.
+
 ## 💖 Поддержать
 
 SayoSign бесплатный и открытый. Если он тебе помог, можно закинуть на чай:

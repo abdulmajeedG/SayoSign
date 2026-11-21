@@ -52,6 +52,10 @@ make
 
 将 `https://murk-sus.github.io/SayoSign/source.json` 添加到 AltStore、SideStore、Feather 或 SayoSign 本身。
 
+## 🔍 另见
+
+[IPALens](https://murk-sus.github.io/IPALens/?lang=zh) — 在浏览器中检查 IPA、.p12、描述文件或 .deb：是否解密、UDID 是否在描述文件中、p12 与描述文件是否匹配。
+
 ## 💖 支持作者
 
 SayoSign 免费且开源。如果它对你有帮助，欢迎打赏：

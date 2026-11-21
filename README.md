@@ -69,6 +69,10 @@ docs/   website and AltStore source (GitHub Pages)
 
 Add `https://murk-sus.github.io/SayoSign/source.json` to AltStore, SideStore, Feather or SayoSign itself.
 
+## 🔍 See also
+
+[IPALens](https://murk-sus.github.io/IPALens/) — check any IPA, .p12, profile or .deb in your browser: decrypted or not, UDID in profile, p12 ↔ profile match.
+
 ## 💖 Support
 
 SayoSign is free and open source. If it saved you time, a tip keeps it going:
