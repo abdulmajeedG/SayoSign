@@ -112,4 +112,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: SayoSign-Desktop-*
-          name: SayoSign Desktop ${{ github.ref_name }}
+          name: SayoSign Desktop ${{ github.ref_name }} (beta)
+          prerelease: true
