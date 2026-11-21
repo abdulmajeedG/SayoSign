@@ -19,10 +19,10 @@
       "versions": [
         {
           "version": "1.0.0",
-          "date": "2026-11-21",
-          "localizedDescription": "First release.",
+          "date": "2026-11-22",
+          "localizedDescription": "First public release: .p12 and Apple ID signing, tweak injection with SayoHook, OCSP check, offline installs. English, Russian and Simplified Chinese.",
           "downloadURL": "https://github.com/murk-sus/SayoSign/releases/download/v1.0.0/SayoSign.ipa",
-          "size": 0,
+          "size": 1284894,
           "minOSVersion": "15.0"
         }
       ],
@@ -31,8 +31,22 @@
         "privacy": {
           "NSLocalNetworkUsageDescription": "SayoSign runs a tiny server on this iPhone to install signed apps."
         }
-      }
+      },
+      "version": "1.0.0",
+      "versionDate": "2026-11-22",
+      "downloadURL": "https://github.com/murk-sus/SayoSign/releases/download/v1.0.0/SayoSign.ipa",
+      "size": 1284894
     }
   ],
-  "news": []
+  "news": [
+    {
+      "title": "SayoSign 1.0.0",
+      "identifier": "release-1.0.0",
+      "caption": "First public release. Now in English, Русский and 中文.",
+      "date": "2026-11-22",
+      "tintColor": "#F0566E",
+      "appID": "dev.murk.sayosign",
+      "notify": true
+    }
+  ]
 }
