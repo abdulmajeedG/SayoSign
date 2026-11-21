@@ -213,3 +213,4 @@
 "Your iPhone UDID is needed to register it with Apple. Find it in Finder/iTunes or on a UDID website." = "Your iPhone UDID is needed to register it with Apple. Find it in Finder/iTunes or on a UDID website.";
 "Your password is sent only to Apple. Free accounts get 7-day certificates and up to 3 apps at a time." = "Your password is sent only to Apple. Free accounts get 7-day certificates and up to 3 apps at a time.";
 "iOS only installs apps over HTTPS. SayoSign made a private certificate authority on this iPhone, its key never leaves the device. Trust it once and installs work offline forever." = "iOS only installs apps over HTTPS. SayoSign made a private certificate authority on this iPhone, its key never leaves the device. Trust it once and installs work offline forever.";
+"Signed apps" = "Signed apps";

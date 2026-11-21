@@ -26,7 +26,7 @@ struct LibraryView: View {
                     header
                     Picker("", selection: $segment) {
                         Text(L("Imported")).tag(0)
-                        Text(L("Signed")).tag(1)
+                        Text(L("Signed apps")).tag(1)
                     }
                     .pickerStyle(.segmented)
                     ForEach(state.downloads) { d in

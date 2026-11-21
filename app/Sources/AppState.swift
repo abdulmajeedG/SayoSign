@@ -378,6 +378,50 @@ final class AppState: ObservableObject {
         save()
     }
 
+    func scanInbox() async {
+        let fm = Paths.fm
+        let docs = Paths.documents
+        guard let items = try? fm.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil) else { return }
+        var p12: URL?
+        var profile: URL?
+        for u in items {
+            switch u.pathExtension.lowercased() {
+            case "ipa", "tipa":
+                let moved = Paths.work.appendingPathComponent(UUID().uuidString + "." + u.pathExtension)
+                guard (try? fm.moveItem(at: u, to: moved)) != nil else { continue }
+                await importIPA(moved, source: "Files")
+                try? fm.removeItem(at: moved)
+            case "deb", "dylib":
+                let dst = Paths.tweaks.appendingPathComponent(u.lastPathComponent)
+                try? fm.removeItem(at: dst)
+                if (try? fm.moveItem(at: u, to: dst)) != nil { show(LF("Saved tweak %@", u.lastPathComponent)) }
+            case "p12", "pfx":
+                p12 = u
+            case "mobileprovision":
+                profile = u
+            default:
+                break
+            }
+        }
+        if p12 != nil || profile != nil {
+            let c = CertificateImportCoordinator.shared
+            if let p = p12 {
+                let dst = Paths.work.appendingPathComponent(p.lastPathComponent)
+                try? fm.removeItem(at: dst)
+                try? fm.moveItem(at: p, to: dst)
+                c.p12 = dst
+            }
+            if let m = profile {
+                let dst = Paths.work.appendingPathComponent(m.lastPathComponent)
+                try? fm.removeItem(at: dst)
+                try? fm.moveItem(at: m, to: dst)
+                c.profile = dst
+            }
+            tab = 1
+            c.presented = true
+        }
+    }
+
     func removeSource(_ s: RepoSource) {
         sources.removeAll { $0.id == s.id }
         save()

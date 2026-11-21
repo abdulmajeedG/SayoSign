@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SayoSign</title>
+<meta name="description" content="On-device IPA signer for iOS. Sign with .p12 or Apple ID, inject tweaks, install offline.">
+<link rel="icon" href="assets/icon.png">
+<link rel="apple-touch-icon" href="assets/icon.png">
+<meta property="og:title" content="SayoSign">
+<meta property="og:description" content="On-device IPA signer for iOS 🎀">
+<meta property="og:image" content="assets/icon.png">
+<style>
+:root {
+  --bg: #fff7f3;
+  --card: #ffffff;
+  --ink: #2b1b1f;
+  --muted: #8a6d73;
+  --coral: #ff7e8a;
+  --rose: #f0566e;
+  --peach: #ffb3a7;
+  --line: #f5d9d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1a1013;
+    --card: #26171b;
+    --ink: #fbeff0;
+    --muted: #c7a5ab;
+    --line: #3a252a;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 17px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 980px; margin: 0 auto; padding: 0 16px; }
+header { padding: 64px 0 40px; text-align: center; }
+.logo { width: 120px; height: 120px; border-radius: 27px; box-shadow: 0 18px 50px -12px rgba(240,86,110,.55); }
+h1 {
+  font-size: clamp(40px, 8vw, 68px);
+  margin: 22px 0 6px;
+  letter-spacing: -0.03em;
+  background: linear-gradient(135deg, var(--peach), var(--coral) 50%, var(--rose));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.tag { font-size: clamp(18px, 3vw, 22px); color: var(--muted); margin: 0 auto; max-width: 620px; }
+.buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 30px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 14px 22px; border-radius: 16px; font-weight: 700; text-decoration: none;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.btn:active { transform: scale(.97); }
+.primary { color: #fff; background: linear-gradient(135deg, var(--peach), var(--coral) 50%, var(--rose)); box-shadow: 0 10px 30px -10px rgba(240,86,110,.7); }
+.ghost { color: var(--rose); background: color-mix(in srgb, var(--coral) 14%, transparent); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin: 30px 0 50px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 22px; }
+.card h3 { margin: 6px 0 6px; font-size: 19px; }
+.card p { margin: 0; color: var(--muted); font-size: 15.5px; }
+.emoji { font-size: 28px; }
+h2 { font-size: 30px; letter-spacing: -0.02em; margin: 10px 0 14px; }
+ol { padding-left: 22px; }
+ol li { margin: 8px 0; }
+code { background: color-mix(in srgb, var(--coral) 14%, transparent); padding: 2px 7px; border-radius: 7px; font-size: 14px; word-break: break-all; }
+footer { padding: 40px 0 60px; color: var(--muted); font-size: 14px; text-align: center; }
+a { color: var(--rose); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img class="logo" src="assets/icon.png" alt="SayoSign icon">
+    <h1>SayoSign</h1>
+    <p class="tag">A cute and very capable IPA signer that runs right on your iPhone. Sign, inject tweaks, install. No computer needed.</p>
+    <div class="buttons">
+      <a class="btn primary" href="https://github.com/murk-sus/SayoSign/releases/latest">⬇︎ Download IPA</a>
+      <a class="btn ghost" href="https://github.com/murk-sus/SayoSign">GitHub</a>
+      <a class="btn ghost" id="altstore" href="altstore://source?url=https://murk-sus.github.io/SayoSign/source.json">Add to AltStore</a>
+    </div>
+  </header>
+
+  <section class="grid">
+    <div class="card"><div class="emoji">✍️</div><h3>Own signing engine</h3><p>Written from scratch in C: Mach-O, CodeDirectory, CMS, DER entitlements, nested bundles, ZIP64.</p></div>
+    <div class="card"><div class="emoji">🔎</div><h3>Live revocation check</h3><p>Asks Apple's OCSP responder whether your certificate is still alive and shows days left.</p></div>
+    <div class="card"><div class="emoji"></div><h3>Apple ID sign-in</h3><p>Free or paid developer account with 2FA. Device, certificate and profiles are made for you.</p></div>
+    <div class="card"><div class="emoji">🧩</div><h3>Tweak injection</h3><p>.dylib, .deb (gz/xz/zstd) and .framework, powered by SayoHook, our own Substrate-compatible hooking engine.</p></div>
+    <div class="card"><div class="emoji">📶</div><h3>Offline install</h3><p>HTTPS on localhost with a certificate authority generated on your device. No leaked keys, no servers.</p></div>
+    <div class="card"><div class="emoji">🛍️</div><h3>Sources</h3><p>AltStore, SideStore, Feather and ESign repositories with search, screenshots and one-tap download.</p></div>
+  </section>
+
+  <section class="card">
+    <h2>Get started</h2>
+    <ol>
+      <li>Download <code>SayoSign.ipa</code> from Releases and sign it once with any tool you already have.</li>
+      <li>Import your <code>.p12</code> with its <code>.mobileprovision</code>, or sign in with your Apple ID.</li>
+      <li>Open <b>Settings → Local installer setup</b> and trust the on-device certificate once.</li>
+      <li>Import any IPA, tap <b>Sign</b>, then <b>Install</b>. 🎀</li>
+    </ol>
+    <p>Source URL: <code>https://murk-sus.github.io/SayoSign/source.json</code></p>
+  </section>
+
+  <footer>
+    Made with 🎀 by murk · GPL-3.0 · Icon uses Twemoji (CC-BY 4.0) · Not affiliated with Apple
+  </footer>
+</div>
+</body>
+</html>

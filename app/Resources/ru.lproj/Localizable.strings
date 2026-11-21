@@ -214,3 +214,4 @@
 "Your iPhone UDID is needed to register it with Apple. Find it in Finder/iTunes or on a UDID website." = "UDID нужен, чтобы зарегистрировать iPhone в Apple. Его можно узнать в Finder/iTunes или на сайте для UDID.";
 "Your password is sent only to Apple. Free accounts get 7-day certificates and up to 3 apps at a time." = "Пароль отправляется только в Apple. Бесплатный аккаунт даёт сертификат на 7 дней и до 3 приложений одновременно.";
 "iOS only installs apps over HTTPS. SayoSign made a private certificate authority on this iPhone, its key never leaves the device. Trust it once and installs work offline forever." = "iOS ставит приложения только по HTTPS. SayoSign создал на этом iPhone личный центр сертификации, его ключ никогда не покидает устройство. Доверься ему один раз — и установка будет работать офлайн навсегда.";
+"Signed apps" = "Подписанные";

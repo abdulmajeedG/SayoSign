@@ -20,6 +20,7 @@ struct SayoSignApp: App {
 struct RootView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var certImport: CertificateImportCoordinator
+    @Environment(\.scenePhase) var phase
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -64,7 +65,11 @@ struct RootView: View {
         .sheet(item: $state.pendingSign) { app in
             SignView(app: app).environmentObject(state)
         }
+        .onChange(of: phase) { p in
+            if p == .active { Task { await state.scanInbox() } }
+        }
         .task {
+            await state.scanInbox()
             if state.certificates.contains(where: { $0.ocspChecked == nil || $0.ocspChecked! < Date().addingTimeInterval(-3600) }) {
                 await state.refreshAllOCSP()
             }

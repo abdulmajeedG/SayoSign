@@ -1,0 +1,38 @@
+{
+  "name": "SayoSign",
+  "identifier": "dev.murk.sayosign.source",
+  "subtitle": "On-device IPA signer",
+  "description": "Official source for SayoSign.",
+  "iconURL": "https://murk-sus.github.io/SayoSign/assets/icon.png",
+  "website": "https://murk-sus.github.io/SayoSign/",
+  "tintColor": "#F0566E",
+  "apps": [
+    {
+      "name": "SayoSign",
+      "bundleIdentifier": "dev.murk.sayosign",
+      "developerName": "murk",
+      "subtitle": "Sign, inject, install. On your iPhone.",
+      "localizedDescription": "SayoSign signs IPA files right on your iPhone with your .p12 or Apple ID, injects tweaks with its own SayoHook engine, checks certificate revocation via OCSP and installs apps offline through an on-device HTTPS server.",
+      "iconURL": "https://murk-sus.github.io/SayoSign/assets/icon.png",
+      "tintColor": "#F0566E",
+      "category": "utilities",
+      "versions": [
+        {
+          "version": "1.0.0",
+          "date": "2026-11-21",
+          "localizedDescription": "First release.",
+          "downloadURL": "https://github.com/murk-sus/SayoSign/releases/download/v1.0.0/SayoSign.ipa",
+          "size": 0,
+          "minOSVersion": "15.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {
+          "NSLocalNetworkUsageDescription": "SayoSign runs a tiny server on this iPhone to install signed apps."
+        }
+      }
+    }
+  ],
+  "news": []
+}

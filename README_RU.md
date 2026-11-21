@@ -1,0 +1,74 @@
+<p align="center">
+  <img src="docs/assets/icon.png" width="128" alt="Иконка SayoSign">
+</p>
+
+<h1 align="center">SayoSign</h1>
+
+<p align="center">
+  <b>Милый и очень мощный подписыватель IPA прямо на iPhone.</b><br>
+  Подпись через .p12 или бесплатный Apple ID, инжект твиков своим движком хуков, установка без компьютера и интернета.
+</p>
+
+<p align="center">
+  <a href="https://github.com/murk-sus/SayoSign/actions"><img src="https://github.com/murk-sus/SayoSign/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <img src="https://img.shields.io/badge/iOS-15%2B-ff7e8a" alt="iOS 15+">
+  <img src="https://img.shields.io/badge/license-GPL--3.0-f0566e" alt="GPL-3.0">
+  <a href="README.md"><img src="https://img.shields.io/badge/README-English-ffb3a7" alt="English"></a>
+</p>
+
+---
+
+## ✨ Возможности
+
+- **Подпись прямо на устройстве.** Собственный движок на C, написанный с нуля, без OpenSSL и zsign внутри. Он умеет:
+  - Mach-O, в том числе fat-бинарники;
+  - CodeDirectory на SHA-256 и CMS-подпись;
+  - entitlements в XML и DER;
+  - вложенные фреймворки и расширения, `_CodeSignature/CodeResources`;
+  - упаковку IPA в ZIP64.
+- **Сертификаты.** Импорт `.p12` вместе с `.mobileprovision`. Видны команда, срок действия, устройства и entitlements, а **отзыв проверяется в реальном времени через OCSP** Apple.
+- **Вход через Apple ID.** Работает с бесплатным или платным аккаунтом разработчика. SayoSign сам проходит GrandSlam: SRP-6a и 2FA через доверенное устройство или SMS. Затем через Apple Developer Services регистрирует устройство, создаёт сертификат и для каждого приложения на лету получает профиль.
+- **Инжект твиков.** Поддерживаются `.dylib`, `.deb` (gzip, xz, lzma, zstd; для zstd свой декодер) и `.framework`. Зависимости Substrate, ElleKit, libhooker и substitute переподключаются автоматически.
+- **SayoHook.** Свой фреймворк хуков, который ставится как `CydiaSubstrate.framework`. Экспортирует `MSHookMessageEx`, `MSHookFunction`, `MSFindSymbol`, `MSGetImageByName`, `LHHookFunctions`, `LBHookMessage` и `substitute_*`.
+  - Хуки Objective-C работают везде.
+  - Хуки C-функций на стоковой iOS работают через перепривязку указателей символов. При доступном JIT используются настоящие inline-трамплины ARM64 с релокацией инструкций.
+- **Установка без интернета.** Приложение ставится через маленький HTTPS-сервер на `localhost` и `itms-services`. Доверие обеспечивает центр сертификации, созданный на твоём устройстве; его ключ никогда не покидает телефон. Никаких утёкших ключей и чужих серверов.
+- **Источники.** Репозитории AltStore, SideStore, Feather и ESign: поиск, скриншоты, скачивание в одно касание.
+- **Правка приложений.** Можно сменить имя, bundle ID, версию, иконку и минимальную iOS, удалить расширения, Watch-приложение и URL-схемы, включить доступ через «Файлы» и добавить свои entitlements.
+- **Интерфейс.** Розово-коралловый дизайн с бантиком 🎀, Liquid Glass на iOS 26+, английский и русский языки.
+
+## 📲 Установка
+
+1. Скачай `SayoSign.ipa` из [Releases](https://github.com/murk-sus/SayoSign/releases) или последнюю сборку из [Actions](https://github.com/murk-sus/SayoSign/actions).
+2. Один раз подпиши его чем угодно: другим подписывателем, Sideloadly, AltStore или CLI `sayosign` из этого репозитория.
+3. Открой SayoSign → **Настройки → Настройка установщика** и пройди три шага. Это делается один раз.
+
+## 🛠 Подпись с компьютера
+
+Тот же движок собирается как CLI (Linux или macOS; для чтения p12 нужен OpenSSL):
+
+```sh
+make
+./build/sayosign sign -k cert.p12 -p 1234 -m profile.mobileprovision -i app.ipa -o signed.ipa \
+    -n "Моё приложение" -l tweak.deb -H build/CydiaSubstrate.framework
+./build/sayosign ocsp -k cert.p12 -p 1234
+```
+
+## 🧱 Сборка
+
+Всё собирается в GitHub Actions, Mac не нужен.
+
+- `make && ./tests/run.sh` собирает ядро и запускает тесты: zstd, ZIP64, .deb, а также SRP-6a, AES-GCM и PBKDF2, которые сверяются с эталонными реализациями.
+- `xcodegen generate`, затем `xcodebuild …` собирают неподписанный IPA (см. `.github/workflows/build.yml`).
+
+## 🧾 Источник для AltStore
+
+Добавь `https://murk-sus.github.io/SayoSign/source.json` в AltStore, SideStore, Feather или в сам SayoSign.
+
+## ⚖️ Правовое
+
+SayoSign подписывает приложения **твоими** сертификатами для **твоих** устройств. Не используй его для распространения пиратского софта. Проект не связан с Apple.
+
+Название — отсылка к Сайори. Арт из *Doki Doki Literature Club* не используется. Иконка собрана из [Twemoji](https://github.com/jdecked/twemoji) 🎀 ✒️ (CC-BY 4.0).
+
+Лицензия **GPL-3.0**.
