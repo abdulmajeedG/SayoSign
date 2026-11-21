@@ -14,6 +14,7 @@
   <img src="https://img.shields.io/badge/iOS-15%2B-ff7e8a" alt="iOS 15+">
   <img src="https://img.shields.io/badge/license-GPL--3.0-f0566e" alt="GPL-3.0">
   <a href="README_RU.md"><img src="https://img.shields.io/badge/README-на%20русском-ffb3a7" alt="Russian"></a>
+  <a href="README_ZH.md"><img src="https://img.shields.io/badge/README-简体中文-ffb3a7" alt="Chinese"></a>
 </p>
 
 ---
@@ -30,7 +31,7 @@
 - **Offline installs.** A tiny HTTPS server on `localhost` and `itms-services` install the app. Trust comes from a certificate authority generated on your device; its private key never leaves the phone, so there are no leaked keys and no third-party servers.
 - **Sources.** AltStore, SideStore, Feather and ESign repositories with search, screenshots and one-tap download.
 - **App tweaks.** Change the name, bundle ID, version, icon and minimum iOS. You can also remove extensions, Watch apps or URL schemes, enable Files sharing, and add extra entitlements.
-- **Interface.** Pink-coral design with a little bow 🎀, Liquid Glass on iOS 26+, English and Russian.
+- **Interface.** Pink-coral design with a little bow 🎀, Liquid Glass on iOS 26+, English, Russian and Simplified Chinese.
 
 ## 📲 Install
 
@@ -67,6 +68,20 @@ docs/   website and AltStore source (GitHub Pages)
 ## 🧾 AltStore source
 
 Add `https://murk-sus.github.io/SayoSign/source.json` to AltStore, SideStore, Feather or SayoSign itself.
+
+## 💖 Support
+
+SayoSign is free and open source. If it saved you time, a tip keeps it going:
+
+| Network | Address |
+|---|---|
+| USDT (TRC20) | `TCPD7jzSMtQ4zkoSxSbUZi6RFoVdKqv78w` |
+| TON | `UQAVaWTuYuEF8A_qiVEcHnqhomp2UdYvW4fHxyhJVxFkQe1z` |
+| BTC | `bc1qqvt25c9tzw2yfdpvf738gzzk4r5uyvkrrlz4z0` |
+| ETH (ERC20) | `0xE7497CF78B691F84D2f1A2Dc30223BB53B3EF38D` |
+| SOL | `DhcDnnqK23gwvkRRHtNd3TBXN9gHmT4V7LZrAPHgCR6n` |
+
+Donation page with QR codes: **[murk-sus.github.io/donate](https://murk-sus.github.io/donate/)** · Telegram channel: [@jailbreak_IOS_and_tweaks](https://t.me/jailbreak_IOS_and_tweaks)
 
 ## ⚖️ Legal
 

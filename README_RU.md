@@ -14,6 +14,7 @@
   <img src="https://img.shields.io/badge/iOS-15%2B-ff7e8a" alt="iOS 15+">
   <img src="https://img.shields.io/badge/license-GPL--3.0-f0566e" alt="GPL-3.0">
   <a href="README.md"><img src="https://img.shields.io/badge/README-English-ffb3a7" alt="English"></a>
+  <a href="README_ZH.md"><img src="https://img.shields.io/badge/README-简体中文-ffb3a7" alt="Chinese"></a>
 </p>
 
 ---
@@ -35,7 +36,7 @@
 - **Установка без интернета.** Приложение ставится через маленький HTTPS-сервер на `localhost` и `itms-services`. Доверие обеспечивает центр сертификации, созданный на твоём устройстве; его ключ никогда не покидает телефон. Никаких утёкших ключей и чужих серверов.
 - **Источники.** Репозитории AltStore, SideStore, Feather и ESign: поиск, скриншоты, скачивание в одно касание.
 - **Правка приложений.** Можно сменить имя, bundle ID, версию, иконку и минимальную iOS, удалить расширения, Watch-приложение и URL-схемы, включить доступ через «Файлы» и добавить свои entitlements.
-- **Интерфейс.** Розово-коралловый дизайн с бантиком 🎀, Liquid Glass на iOS 26+, английский и русский языки.
+- **Интерфейс.** Розово-коралловый дизайн с бантиком 🎀, Liquid Glass на iOS 26+, английский, русский и китайский языки.
 
 ## 📲 Установка
 
@@ -64,6 +65,20 @@ make
 ## 🧾 Источник для AltStore
 
 Добавь `https://murk-sus.github.io/SayoSign/source.json` в AltStore, SideStore, Feather или в сам SayoSign.
+
+## 💖 Поддержать
+
+SayoSign бесплатный и открытый. Если он тебе помог, можно закинуть на чай:
+
+| Сеть | Адрес |
+|---|---|
+| USDT (TRC20) | `TCPD7jzSMtQ4zkoSxSbUZi6RFoVdKqv78w` |
+| TON | `UQAVaWTuYuEF8A_qiVEcHnqhomp2UdYvW4fHxyhJVxFkQe1z` |
+| BTC | `bc1qqvt25c9tzw2yfdpvf738gzzk4r5uyvkrrlz4z0` |
+| ETH (ERC20) | `0xE7497CF78B691F84D2f1A2Dc30223BB53B3EF38D` |
+| SOL | `DhcDnnqK23gwvkRRHtNd3TBXN9gHmT4V7LZrAPHgCR6n` |
+
+Страница с QR-кодами: **[murk-sus.github.io/donate](https://murk-sus.github.io/donate/)** · Telegram-канал: [@jailbreak_IOS_and_tweaks](https://t.me/jailbreak_IOS_and_tweaks)
 
 ## ⚖️ Правовое
 
