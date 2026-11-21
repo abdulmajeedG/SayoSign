@@ -298,3 +298,140 @@ size_t sayo_apple_chain(const uint8_t *leaf, size_t leaf_len, const uint8_t **ou
     }
     return n;
 }
+
+static void name_cn(sayo_buf *out, const char *cn, const char *org) {
+    sayo_buf name, rdn, set;
+    sayo_buf_init(&name);
+    if (org && *org) {
+        sayo_buf_init(&rdn);
+        sayo_buf_init(&set);
+        der_oid(&rdn, "2.5.4.10");
+        der_utf8(&rdn, org);
+        der_wrap(&set, 0x30, &rdn);
+        der_wrap(&name, 0x31, &set);
+    }
+    sayo_buf_init(&rdn);
+    sayo_buf_init(&set);
+    der_oid(&rdn, "2.5.4.3");
+    der_utf8(&rdn, cn);
+    der_wrap(&set, 0x30, &rdn);
+    der_wrap(&name, 0x31, &set);
+    der_wrap(out, 0x30, &name);
+}
+
+static void gentime(sayo_buf *out, int64_t t) {
+    if (t < 2524608000LL) { der_utctime(out, t); return; }
+    time_t tt = (time_t)t;
+    struct tm tm;
+    gmtime_r(&tt, &tm);
+    char s[32];
+    snprintf(s, sizeof s, "%04d%02d%02d%02d%02d%02dZ", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+    der_tlv(out, 0x18, (const uint8_t *)s, strlen(s));
+}
+
+static void ext(sayo_buf *exts, const char *oid, bool critical, sayo_buf *value) {
+    sayo_buf e;
+    sayo_buf_init(&e);
+    der_oid(&e, oid);
+    if (critical) { uint8_t t[3] = { 0x01, 0x01, 0xff }; sayo_buf_append(&e, t, 3); }
+    der_wrap(&e, 0x04, value);
+    der_wrap(exts, 0x30, &e);
+}
+
+int sayo_x509_tbs(uint64_t serial, const char *issuer_cn, const char *subject_cn, const char *org,
+                  int64_t not_before, int64_t not_after,
+                  const uint8_t *pub, size_t pl, const uint8_t *issuer_pub, size_t ipl,
+                  int is_ca, const char *dns, const char *ip, sayo_buf *tbs) {
+    sayo_buf_init(tbs);
+    sayo_buf in, v, alg, val, spki, bits, exts, x, wrap;
+    sayo_buf_init(&in);
+    sayo_buf_init(&v);
+    der_int_u64(&v, 2);
+    der_wrap(&in, 0xa0, &v);
+    der_int_u64(&in, serial);
+    sayo_buf_init(&alg);
+    der_oid(&alg, "1.2.840.113549.1.1.11");
+    der_null(&alg);
+    der_wrap(&in, 0x30, &alg);
+    name_cn(&in, issuer_cn, org);
+    sayo_buf_init(&val);
+    gentime(&val, not_before);
+    gentime(&val, not_after);
+    der_wrap(&in, 0x30, &val);
+    name_cn(&in, subject_cn, org);
+    sayo_buf_init(&spki);
+    sayo_buf_init(&alg);
+    der_oid(&alg, "1.2.840.113549.1.1.1");
+    der_null(&alg);
+    der_wrap(&spki, 0x30, &alg);
+    sayo_buf_init(&bits);
+    sayo_buf_byte(&bits, 0);
+    sayo_buf_append(&bits, pub, pl);
+    der_wrap(&spki, 0x03, &bits);
+    der_wrap(&in, 0x30, &spki);
+
+    sayo_buf_init(&exts);
+    sayo_buf_init(&x);
+    if (is_ca) {
+        uint8_t t[3] = { 0x01, 0x01, 0xff };
+        sayo_buf_append(&x, t, 3);
+    }
+    sayo_buf_init(&wrap);
+    der_wrap(&wrap, 0x30, &x);
+    ext(&exts, "2.5.29.19", true, &wrap);
+    sayo_buf_init(&x);
+    uint8_t ku_ca[2] = { 0x01, 0x06 }, ku_leaf[2] = { 0x05, 0xa0 };
+    der_tlv(&x, 0x03, is_ca ? ku_ca : ku_leaf, 2);
+    ext(&exts, "2.5.29.15", true, &x);
+    uint8_t ski[20];
+    sayo_sha1(pub, pl, ski);
+    sayo_buf_init(&x);
+    der_tlv(&x, 0x04, ski, 20);
+    ext(&exts, "2.5.29.14", false, &x);
+    if (issuer_pub && ipl) {
+        uint8_t aki[20];
+        sayo_sha1(issuer_pub, ipl, aki);
+        sayo_buf_init(&x);
+        sayo_buf_init(&wrap);
+        der_tlv(&x, 0x80, aki, 20);
+        der_wrap(&wrap, 0x30, &x);
+        ext(&exts, "2.5.29.35", false, &wrap);
+    }
+    if (!is_ca) {
+        sayo_buf_init(&x);
+        sayo_buf_init(&wrap);
+        der_oid(&x, "1.3.6.1.5.5.7.3.1");
+        der_wrap(&wrap, 0x30, &x);
+        ext(&exts, "2.5.29.37", false, &wrap);
+        sayo_buf_init(&x);
+        sayo_buf_init(&wrap);
+        if (dns && *dns) {
+            const char *p = dns;
+            while (*p) {
+                const char *c = strchr(p, ',');
+                size_t n = c ? (size_t)(c - p) : strlen(p);
+                der_tlv(&x, 0x82, (const uint8_t *)p, n);
+                p += n;
+                if (*p == ',') p++;
+            }
+        }
+        if (ip && *ip) {
+            unsigned a, b, c, d;
+            if (sscanf(ip, "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
+                uint8_t ipb[4] = { (uint8_t)a, (uint8_t)b, (uint8_t)c, (uint8_t)d };
+                der_tlv(&x, 0x87, ipb, 4);
+            }
+        }
+        der_wrap(&wrap, 0x30, &x);
+        ext(&exts, "2.5.29.17", false, &wrap);
+    }
+    sayo_buf seq;
+    sayo_buf_init(&seq);
+    der_wrap(&seq, 0x30, &exts);
+    der_wrap(&in, 0xa3, &seq);
+    return der_wrap(tbs, 0x30, &in);
+}
+
+int sayo_x509_finish(const uint8_t *tbs, size_t tl, const uint8_t *sig, size_t sl, sayo_buf *cert) {
+    return sayo_csr_finish(tbs, tl, sig, sl, cert);
+}

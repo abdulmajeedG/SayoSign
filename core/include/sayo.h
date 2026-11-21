@@ -109,6 +109,31 @@ size_t sayo_apple_chain(const uint8_t *leaf, size_t leaf_len, const uint8_t **ou
 int sayo_macho_inject(const char *binary, const char *load_path, int weak);
 int sayo_zstd_decode(const uint8_t *p, size_t n, sayo_buf *out);
 
+int sayo_x509_tbs(uint64_t serial, const char *issuer_cn, const char *subject_cn, const char *org,
+                  int64_t not_before, int64_t not_after,
+                  const uint8_t *pub, size_t pl, const uint8_t *issuer_pub, size_t ipl,
+                  int is_ca, const char *dns, const char *ip, sayo_buf *tbs);
+int sayo_x509_finish(const uint8_t *tbs, size_t tl, const uint8_t *sig, size_t sl, sayo_buf *cert);
+
+typedef struct {
+    uint8_t a[32];
+    uint8_t A[256];
+    uint8_t K[32];
+    uint8_t M1[32];
+    uint8_t M2[32];
+} sayo_srp;
+
+int sayo_srp_init(sayo_srp *s, const uint8_t random32[32]);
+int sayo_srp_process(sayo_srp *s, const char *username, const uint8_t *pass_key, size_t pkl,
+                     const uint8_t *salt, size_t sl, const uint8_t *B, size_t bl);
+int sayo_aes_cbc_decrypt(const uint8_t *key, size_t keylen, const uint8_t iv[16], const uint8_t *in, size_t n, sayo_buf *out);
+int sayo_aes_cbc_encrypt(const uint8_t *key, size_t keylen, const uint8_t iv[16], const uint8_t *in, size_t n, sayo_buf *out);
+int sayo_aes_gcm_decrypt(const uint8_t *key, size_t keylen, const uint8_t *iv, size_t ivlen,
+                         const uint8_t *aad, size_t aadlen, const uint8_t *in, size_t n,
+                         const uint8_t tag[16], sayo_buf *out);
+void sayo_hmac_sha256(const uint8_t *key, size_t kl, const uint8_t *msg, size_t ml, uint8_t out[32]);
+void sayo_pbkdf2_sha256(const uint8_t *pw, size_t pl, const uint8_t *salt, size_t sl, uint32_t iter, uint8_t *out, size_t ol);
+
 const char *sayo_last_error(void);
 void sayo_set_error(const char *fmt, ...);
 

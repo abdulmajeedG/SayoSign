@@ -1,0 +1,201 @@
+import SwiftUI
+
+struct SettingsView: View {
+    @EnvironmentObject var state: AppState
+    @State private var setup = false
+    @State private var confirmReset = false
+    @State private var cacheSize: Int64 = 0
+
+    var version: String {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "\(v) (\(b))"
+    }
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    HStack(spacing: 14) {
+                        Image("Logo").resizable().frame(width: 64, height: 64)
+                            .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("SayoSign").font(.title2.weight(.heavy)).foregroundStyle(Theme.gradient)
+                            Text(L("On-device IPA signer")).font(.subheadline).foregroundColor(.secondary)
+                            Text("v" + version).font(.caption).foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+
+                Section(header: Text(L("Installing")), footer: Text(L("SayoSign installs apps through a tiny HTTPS server running on this iPhone. It uses a certificate authority created on this device only."))) {
+                    Button { setup = true } label: { Label(L("Local installer setup"), systemImage: "lock.shield") }
+                    Toggle(L("Stay alive while installing"), isOn: $state.settings.keepAliveAudio)
+                    Stepper(value: $state.settings.serverPort, in: 1025...65000, step: 2) {
+                        HStack { Text(L("Server port")); Spacer(); Text("\(state.settings.serverPort)").foregroundColor(.secondary) }
+                    }
+                }
+
+                Section(header: Text(L("Signing"))) {
+                    Picker(L("Compression"), selection: $state.settings.compressionLevel) {
+                        Text(L("None (fastest)")).tag(0)
+                        Text(L("Fast")).tag(1)
+                        Text(L("Balanced")).tag(6)
+                        Text(L("Smallest")).tag(9)
+                    }
+                    Toggle(L("Remove app extensions by default"), isOn: $state.settings.autoRemovePlugins)
+                    Toggle(L("Remove Watch apps by default"), isOn: $state.settings.removeWatchApps)
+                }
+
+                Section(header: Text(L("Apple ID")), footer: Text(L("Anisette data is needed to talk to Apple servers like a Mac would. You can host your own server."))) {
+                    HStack {
+                        Text(L("Anisette server"))
+                        TextField("https://…", text: $state.settings.anisetteURL)
+                            .multilineTextAlignment(.trailing).foregroundColor(.secondary)
+                            .autocapitalization(.none).disableAutocorrection(true)
+                    }
+                    HStack {
+                        Text("UDID")
+                        TextField("00008110-…", text: $state.settings.udid)
+                            .multilineTextAlignment(.trailing).foregroundColor(.secondary)
+                            .autocapitalization(.allCharacters).disableAutocorrection(true)
+                    }
+                }
+
+                Section(header: Text(L("Storage"))) {
+                    HStack { Text(L("Temporary files")); Spacer(); Text(formatSize(cacheSize)).foregroundColor(.secondary) }
+                    Button(L("Clear temporary files")) {
+                        try? FileManager.default.removeItem(at: Paths.work)
+                        cacheSize = AppState.folderSize(Paths.work)
+                        state.show(L("Cleared"))
+                    }
+                    Button(L("Reset local installer"), role: .destructive) { confirmReset = true }
+                }
+
+                Section(header: Text(L("About"))) {
+                    Link(destination: URL(string: "https://github.com/murk-sus/SayoSign")!) {
+                        Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+                    Link(destination: URL(string: "https://murk-sus.github.io/SayoSign/")!) {
+                        Label(L("Website"), systemImage: "safari")
+                    }
+                    Text(L("Made with 🎀 by murk. Licensed under GPL-3.0. Icon uses Twemoji (CC-BY 4.0)."))
+                        .font(.caption).foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle(L("Settings"))
+            .sheet(isPresented: $setup) { InstallSetupView().environmentObject(state) }
+            .confirmationDialog(L("Reset local installer?"), isPresented: $confirmReset, titleVisibility: .visible) {
+                Button(L("Reset"), role: .destructive) {
+                    InstallServer.shared.stop()
+                    LocalCA.reset()
+                    state.show(L("Local installer reset. Remove the old profile in Settings."))
+                }
+            }
+            .onAppear { cacheSize = AppState.folderSize(Paths.work) }
+        }
+        .navigationViewStyle(.stack)
+    }
+}
+
+struct InstallSetupView: View {
+    @EnvironmentObject var state: AppState
+    @Environment(\.dismiss) var dismiss
+    @Environment(\.scenePhase) var phase
+    @State private var trusted = false
+    @State private var checking = false
+    @State private var error: String?
+    @State private var share: URL?
+
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack {
+                        Spacer()
+                        ZStack {
+                            Circle().fill(Theme.gradient).frame(width: 96, height: 96)
+                            Image(systemName: trusted ? "checkmark.shield.fill" : "lock.shield.fill").font(.system(size: 44)).foregroundColor(.white)
+                        }
+                        Spacer()
+                    }
+                    Text(trusted ? L("All set!") : L("One-time setup")).font(.title.weight(.bold)).frame(maxWidth: .infinity)
+                    Text(L("iOS only installs apps over HTTPS. SayoSign made a private certificate authority on this iPhone, its key never leaves the device. Trust it once and installs work offline forever."))
+                        .font(.callout).foregroundColor(.secondary)
+                    step(1, L("Download the profile"), L("Tap the button and allow the download in Safari.")) {
+                        Button(L("Download profile")) { Task { await openProfile() } }.buttonStyle(SmallButtonStyle())
+                    }
+                    step(2, L("Install it"), L("Settings → General → VPN & Device Management → SayoSign Local Installer → Install.")) {
+                        Button(L("Open Settings")) {
+                            if let u = URL(string: "App-prefs:General&path=ManagedConfigurationList") ?? URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(u)
+                            }
+                        }.buttonStyle(SmallButtonStyle(filled: false))
+                    }
+                    step(3, L("Enable full trust"), L("Settings → General → About → Certificate Trust Settings → turn on SayoSign Local CA.")) { EmptyView() }
+                    if let e = error { Text(e).foregroundColor(.red).font(.callout) }
+                    Button {
+                        if trusted { dismiss() } else { Task { await check() } }
+                    } label: {
+                        HStack {
+                            if checking { ProgressView().tint(.white) }
+                            Text(trusted ? L("Done") : L("Check again"))
+                        }
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    Button(L("Save profile to Files instead")) {
+                        if let d = LocalCA.mobileconfig() {
+                            let u = Paths.work.appendingPathComponent("SayoSign.mobileconfig")
+                            try? d.write(to: u)
+                            share = u
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .font(.footnote)
+                }
+                .padding(20)
+            }
+            .navigationTitle(L("Local installer"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("Close")) { dismiss() } } }
+            .sheet(item: Binding(get: { share.map { ShareItem(url: $0) } }, set: { share = $0?.url })) { ShareSheet(items: [$0.url]) }
+            .task { await check() }
+            .onChange(of: phase) { p in if p == .active { Task { await check() } } }
+        }
+    }
+
+    func step<V: View>(_ n: Int, _ title: String, _ text: String, @ViewBuilder action: () -> V) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(n)").font(.headline).foregroundColor(.white).frame(width: 30, height: 30).background(Circle().fill(Theme.gradient))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.headline)
+                Text(text).font(.subheadline).foregroundColor(.secondary)
+                action()
+            }
+        }
+    }
+
+    func openProfile() async {
+        do {
+            try InstallServer.shared.start(port: state.settings.serverPort)
+            InstallServer.shared.keepAlive(true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 60) { InstallServer.shared.keepAlive(false) }
+            if let u = URL(string: "\(InstallServer.shared.httpBase)/ca.mobileconfig") { await UIApplication.shared.open(u) }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    func check() async {
+        checking = true
+        defer { checking = false }
+        do {
+            try InstallServer.shared.start(port: state.settings.serverPort)
+            trusted = await Installer.trusted(port: state.settings.serverPort)
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
+        if trusted { InstallServer.shared.keepAlive(false) }
+    }
+}

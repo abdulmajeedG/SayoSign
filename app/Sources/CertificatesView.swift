@@ -1,0 +1,245 @@
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct CertificatesView: View {
+    @EnvironmentObject var state: AppState
+    @State private var adding = false
+    @State private var appleID = false
+    @State private var checking = false
+
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 14) {
+                    HStack(spacing: 12) {
+                        Button { adding = true } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "doc.badge.plus").font(.title2)
+                                Text(L("Import .p12")).font(.subheadline.weight(.semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 18)
+                        }
+                        .buttonStyle(.plain)
+                        .glassy()
+                        Button { appleID = true } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "applelogo").font(.title2)
+                                Text(L("Apple ID")).font(.subheadline.weight(.semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 18)
+                        }
+                        .buttonStyle(.plain)
+                        .glassy()
+                    }
+                    .foregroundColor(Theme.rose)
+                    .padding(.top, 6)
+
+                    if state.certificates.isEmpty {
+                        EmptyState(title: L("No certificates"), subtitle: L("Import a .p12 with its .mobileprovision, or sign in with a free Apple ID."))
+                    }
+                    ForEach(state.certificates) { c in
+                        CertificateCard(cert: c)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 30)
+            }
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .navigationTitle(L("Certificates"))
+            .refreshable { await state.refreshAllOCSP() }
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        Task {
+                            checking = true
+                            await state.refreshAllOCSP()
+                            checking = false
+                            state.show(L("Certificate status updated"))
+                        }
+                    } label: {
+                        if checking { ProgressView() } else { Image(systemName: "arrow.clockwise") }
+                    }
+                }
+            }
+            .sheet(isPresented: $adding) { ImportCertificateView(prefillP12: nil, prefillProfile: nil).environmentObject(state) }
+            .sheet(isPresented: $appleID) { AppleIDView().environmentObject(state) }
+        }
+        .navigationViewStyle(.stack)
+    }
+}
+
+struct CertificateCard: View {
+    @EnvironmentObject var state: AppState
+    let cert: StoredCertificate
+    @State private var expanded = false
+    @State private var confirmDelete = false
+
+    var selected: Bool { state.selectedCertificate?.id == cert.id }
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Text(cert.nickname).font(.headline).lineLimit(1)
+                            if cert.fromAppleID { Image(systemName: "applelogo").font(.caption) }
+                        }
+                        Text(cert.details.subject).font(.caption).foregroundColor(.secondary).lineLimit(2)
+                    }
+                    Spacer()
+                    if selected {
+                        Image(systemName: "checkmark.circle.fill").font(.title2).foregroundColor(Theme.rose)
+                    } else {
+                        Button(L("Use")) { state.settings.selectedCertificate = cert.id }.buttonStyle(SmallButtonStyle(filled: false))
+                    }
+                }
+                HStack(spacing: 8) {
+                    StatusDot(status: cert.ocsp, expired: cert.isExpired)
+                    Pill(text: LF("%d days left", cert.daysLeft), color: cert.daysLeft < 14 ? .orange : Theme.coral)
+                    Pill(text: cert.profile.isWildcard ? L("Wildcard") : L("Explicit ID"), color: .secondary)
+                }
+                if let r = cert.revokedAt {
+                    Text(LF("Revoked on %@", dateFormatter.string(from: r))).font(.caption).foregroundColor(.red)
+                }
+                if expanded {
+                    Divider()
+                    InfoRow(L("Team"), "\(cert.profile.teamName) (\(cert.details.team))")
+                    InfoRow(L("Type"), cert.details.subject.components(separatedBy: ":").first ?? "")
+                    InfoRow(L("Issuer"), cert.details.issuer)
+                    InfoRow(L("Serial"), cert.details.serial)
+                    InfoRow(L("Certificate expires"), dateFormatter.string(from: cert.details.notAfter))
+                    InfoRow(L("Profile"), cert.profile.name)
+                    InfoRow(L("App ID"), cert.profile.appID)
+                    InfoRow(L("Profile expires"), dateFormatter.string(from: cert.profile.expiration))
+                    InfoRow(L("Devices"), cert.profile.allDevices ? L("All (enterprise)") : "\(cert.profile.devices.count)")
+                    InfoRow(L("Debuggable"), cert.profile.getTaskAllow ? L("Yes") : L("No"))
+                    if let d = cert.ocspChecked { InfoRow(L("Checked"), RelativeDateTimeFormatter().localizedString(for: d, relativeTo: Date())) }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L("Entitlements")).font(.caption.weight(.semibold)).foregroundColor(.secondary)
+                        Text(cert.profile.entitlementKeys.map { $0.replacingOccurrences(of: "com.apple.developer.", with: "") }.joined(separator: " · "))
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                    HStack {
+                        Button {
+                            Task { await state.refreshOCSP(cert) }
+                        } label: { Label(L("Check now"), systemImage: "arrow.clockwise") }
+                            .buttonStyle(SmallButtonStyle(filled: false))
+                        Spacer()
+                        Button(role: .destructive) { confirmDelete = true } label: { Label(L("Delete"), systemImage: "trash") }
+                            .buttonStyle(SmallButtonStyle(filled: false))
+                    }
+                }
+            }
+        }
+        .onTapGesture { withAnimation(.spring()) { expanded.toggle() } }
+        .confirmationDialog(L("Delete this certificate?"), isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button(L("Delete"), role: .destructive) { state.deleteCertificate(cert) }
+        }
+    }
+}
+
+struct InfoRow: View {
+    let title: String
+    let value: String
+    init(_ t: String, _ v: String) { title = t; value = v }
+    var body: some View {
+        HStack(alignment: .top) {
+            Text(title).font(.caption).foregroundColor(.secondary)
+            Spacer(minLength: 12)
+            Text(value).font(.caption.weight(.medium)).multilineTextAlignment(.trailing).textSelection(.enabled)
+        }
+    }
+}
+
+struct ImportCertificateView: View {
+    @EnvironmentObject var state: AppState
+    @Environment(\.dismiss) var dismiss
+    @State var prefillP12: URL?
+    @State var prefillProfile: URL?
+    @State private var p12: URL?
+    @State private var profile: URL?
+    @State private var password = ""
+    @State private var nickname = ""
+    @State private var picking: Int?
+    @State private var error: String?
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text(L("Files"))) {
+                    Button { picking = 0 } label: {
+                        HStack {
+                            Label(L("Certificate (.p12)"), systemImage: "key.fill")
+                            Spacer()
+                            Text(p12?.lastPathComponent ?? L("Choose")).foregroundColor(.secondary).lineLimit(1)
+                        }
+                    }
+                    Button { picking = 1 } label: {
+                        HStack {
+                            Label(L("Profile (.mobileprovision)"), systemImage: "doc.text.fill")
+                            Spacer()
+                            Text(profile?.lastPathComponent ?? L("Choose")).foregroundColor(.secondary).lineLimit(1)
+                        }
+                    }
+                }
+                Section(header: Text(L("Details"))) {
+                    SecureField(L("Password"), text: $password)
+                    TextField(L("Nickname (optional)"), text: $nickname)
+                }
+                if let e = error { Section { Text(e).foregroundColor(.red) } }
+                Section {
+                    Button(L("Import")) { save() }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(p12 == nil || profile == nil)
+                        .listRowBackground(Color.clear)
+                }
+            }
+            .navigationTitle(L("Add certificate"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("Cancel")) { dismiss() } } }
+            .fileImporter(isPresented: Binding(get: { picking != nil }, set: { if !$0 { picking = nil } }),
+                          allowedContentTypes: picking == 0 ? [.p12, .pkcs12, .data] : [.mobileprovision, .data]) { r in
+                let which = picking
+                picking = nil
+                guard case .success(let u) = r else { return }
+                let scoped = u.startAccessingSecurityScopedResource()
+                let dst = Paths.work.appendingPathComponent(UUID().uuidString + "-" + u.lastPathComponent)
+                try? FileManager.default.copyItem(at: u, to: dst)
+                if scoped { u.stopAccessingSecurityScopedResource() }
+                if which == 0 { p12 = dst } else { profile = dst }
+            }
+            .onAppear {
+                if p12 == nil { p12 = prefillP12 }
+                if profile == nil { profile = prefillProfile }
+                CertificateImportCoordinator.shared.p12 = nil
+                CertificateImportCoordinator.shared.profile = nil
+                if let p = p12 { autoProfile(near: p) }
+            }
+        }
+    }
+
+    func autoProfile(near p: URL) {
+        guard profile == nil else { return }
+        let dir = p.deletingLastPathComponent()
+        if let f = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?.first(where: { $0.pathExtension == "mobileprovision" }) {
+            profile = f
+        }
+    }
+
+    func save() {
+        guard let p = p12, let m = profile, let pd = try? Data(contentsOf: p), let md = try? Data(contentsOf: m) else {
+            error = L("Cannot read the selected files")
+            return
+        }
+        do {
+            _ = try state.addCertificate(p12: pd, profile: md, password: password, nickname: nickname)
+            state.show(L("Certificate added"))
+            dismiss()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
