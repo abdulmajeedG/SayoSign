@@ -2,6 +2,7 @@
 #define SAYO_INTERNAL_H
 
 #include "sayo.h"
+#include "compat.h"
 #include <stdbool.h>
 
 typedef enum {

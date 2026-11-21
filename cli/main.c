@@ -1,4 +1,5 @@
 #include "sayo.h"
+#include "../core/src/compat.h"
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/pkcs12.h>
@@ -9,6 +10,8 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+int rmtree(const char *path);
 
 static int ossl_sign(void *ctx, const uint8_t *msg, size_t n, sayo_buf *sig) {
     EVP_PKEY *key = ctx;
@@ -136,7 +139,7 @@ int main(int argc, char **argv) {
             size_t l = strlen(optarg);
             if (l > 4 && !strcmp(optarg + l - 4, ".deb")) {
                 char *d = malloc(4096);
-                snprintf(d, 4096, "/tmp/sayodeb.%d.%zu", getpid(), ntmp);
+                snprintf(d, 4096, "%s/sayodeb.%d.%zu", sayo_tmp_dir(), getpid(), ntmp);
                 if (sayo_extract_deb(optarg, d)) { fprintf(stderr, "error: %s\n", sayo_last_error()); return 1; }
                 tmpdirs[ntmp++] = d;
                 char **paths;
@@ -178,12 +181,17 @@ int main(int argc, char **argv) {
             sayo_buf req;
             char url[512];
             if (sayo_ocsp_request(cd, cl, chain[0], chain_len[0], &req, url, sizeof url)) { fprintf(stderr, "%s\n", sayo_last_error()); return 1; }
-            sayo_write_file("/tmp/sayo_ocsp.req", req.data, req.len);
+            char rq[1024], rs[1024];
+            snprintf(rq, sizeof rq, "%s/sayo_ocsp.%d.req", sayo_tmp_dir(), getpid());
+            snprintf(rs, sizeof rs, "%s/sayo_ocsp.%d.resp", sayo_tmp_dir(), getpid());
+            sayo_write_file(rq, req.data, req.len);
             char cmdline[1024];
-            snprintf(cmdline, sizeof cmdline, "curl -s -X POST -H 'Content-Type: application/ocsp-request' --data-binary @/tmp/sayo_ocsp.req '%s' -o /tmp/sayo_ocsp.resp", url);
+            snprintf(cmdline, sizeof cmdline, "curl -s -X POST -H \"Content-Type: application/ocsp-request\" --data-binary \"@%s\" \"%s\" -o \"%s\"", rq, url, rs);
             if (system(cmdline)) { fprintf(stderr, "curl failed\n"); return 1; }
             sayo_buf resp;
-            if (sayo_read_file("/tmp/sayo_ocsp.resp", &resp)) return 1;
+            if (sayo_read_file(rs, &resp)) return 1;
+            remove(rq);
+            remove(rs);
             int st;
             int64_t when;
             if (sayo_ocsp_parse(resp.data, resp.len, &st, &when)) { fprintf(stderr, "%s\n", sayo_last_error()); return 1; }
@@ -200,15 +208,11 @@ int main(int argc, char **argv) {
     sayo_buf pb;
     if (sayo_read_file(prov, &pb)) { fprintf(stderr, "%s\n", sayo_last_error()); return 1; }
     sayo_identity id = { cd, cl, chain, chain_len, nchain, ossl_sign, key };
-    char work[256];
-    snprintf(work, sizeof work, "/tmp/sayosign.%d", getpid());
+    char work[1024];
+    snprintf(work, sizeof work, "%s/sayosign.%d", sayo_tmp_dir(), getpid());
     int rc = sayo_sign_ipa(in, out, work, pb.data, pb.len, &id, &o, progress, NULL);
     fprintf(stderr, "\n");
-    for (size_t i = 0; i < ntmp; i++) {
-        char c[4200];
-        snprintf(c, sizeof c, "rm -rf '%s'", tmpdirs[i]);
-        if (system(c)) {}
-    }
+    for (size_t i = 0; i < ntmp; i++) rmtree(tmpdirs[i]);
     if (rc) { fprintf(stderr, "error: %s\n", sayo_last_error()); return 1; }
     printf("signed: %s\n", out);
     return 0;
