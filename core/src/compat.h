@@ -14,7 +14,9 @@
 /* Windows bundles have no symlinks; pretend success so unzip keeps going. */
 static inline int symlink(const char *target, const char *path) { (void)target; (void)path; return 0; }
 static inline long readlink(const char *path, char *buf, size_t n) { (void)path; (void)buf; (void)n; errno = EINVAL; return -1; }
-static inline int chmod_compat(const char *p, int m) { (void)p; (void)m; return 0; }
+#include <time.h>
+static inline struct tm *gmtime_r(const time_t *t, struct tm *out) { return gmtime_s(out, t) ? NULL : out; }
+#define timegm _mkgmtime
 #endif
 
 #include <stdlib.h>
