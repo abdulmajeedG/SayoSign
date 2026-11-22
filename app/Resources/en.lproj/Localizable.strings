@@ -255,3 +255,7 @@
 "Apple still asks for a code. Try signing in again." = "Apple still asks for a code. Try signing in again.";
 "With a manifest service, iOS just asks to install the app; nothing to set up. Leave it empty to use the local HTTPS installer and its one-time profile." = "With a manifest service, iOS just asks to install the app; nothing to set up. Leave it empty to use the local HTTPS installer and its one-time profile.";
 "Manifest service (https://…workers.dev)" = "Manifest service (https://…workers.dev)";
+"Install log" = "Install log";
+"What iOS requested during the last install. Send a screenshot if an install fails." = "What iOS requested during the last install. Send a screenshot if an install fails.";
+"No install yet" = "No install yet";
+"Refresh" = "Refresh";

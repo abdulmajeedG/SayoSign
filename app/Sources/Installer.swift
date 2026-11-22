@@ -173,6 +173,18 @@ final class InstallServer {
     private var plain: NWListener?
     private let queue = DispatchQueue(label: "dev.murk.sayosign.server")
     private var served: Served?
+    /// What iOS asked for during the last install, for Settings → Install log.
+    private var events: [String] = []
+    private var bytesSent: Int64 = 0
+
+    func note(_ s: String) {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        let line = f.string(from: Date()) + "  " + s
+        queue.async { self.events.append(line); if self.events.count > 60 { self.events.removeFirst() } }
+    }
+    func clearLog() { queue.sync { events = []; bytesSent = 0 } }
+    func logLines() -> [String] { queue.sync { events } }
     private var port: UInt16 = 47616
     private var player: AVAudioPlayer?
     private var bgTask: UIBackgroundTaskIdentifier = .invalid
@@ -269,6 +281,7 @@ final class InstallServer {
         let method = String(parts[0])
         var path = String(parts[1])
         if let q = path.firstIndex(of: "?") { path = String(path[..<q]) }
+        note("iOS → \(method) \(path)")
         switch path {
         case "/ping":
             respond(c, status: "200 OK", type: "text/plain", body: Data("ok".utf8))
@@ -309,12 +322,15 @@ final class InstallServer {
             return
         }
         let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
+        bytesSent = 0
+        note("IPA: sending \(size) bytes")
         let header = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: \(size)\r\nConnection: close\r\n\r\n"
         c.send(content: Data(header.utf8), completion: .contentProcessed { _ in })
         if head { try? h.close(); c.cancel(); return }
         func pump() {
             let chunk = (try? h.read(upToCount: 1 << 18)) ?? Data()
             if chunk.isEmpty {
+                note("IPA: all \(bytesSent) bytes sent")
                 try? h.close()
                 c.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { [weak self] _ in
                     c.cancel()
@@ -323,7 +339,11 @@ final class InstallServer {
                 return
             }
             c.send(content: chunk, completion: .contentProcessed { err in
-                if err != nil { try? h.close(); c.cancel(); return }
+                if let err = err {
+                    self.note("IPA: stopped after \(self.bytesSent) bytes: \(err)")
+                    try? h.close(); c.cancel(); return
+                }
+                self.bytesSent += Int64(chunk.count)
                 pump()
             })
         }
@@ -435,6 +455,8 @@ enum Installer {
             while b.hasSuffix("/") { b.removeLast() }
             manifest = b + "/?" + query
         }
+        server.clearLog()
+        server.note(service != nil ? "Manifest from \(service!.host ?? "service"), IPA over \(server.httpBase)" : "Manifest from local HTTPS server")
         let enc = manifest.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&=?"))) ?? manifest
         guard let u = URL(string: "itms-services://?action=download-manifest&url=\(enc)") else { return }
         await UIApplication.shared.open(u)

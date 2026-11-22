@@ -5,6 +5,7 @@ struct SettingsView: View {
     @State private var setup = false
     @State private var confirmReset = false
     @State private var cacheSize: Int64 = 0
+    @State private var installLog: [String] = []
     @State private var checking = false
     @State private var anisetteInfo: [(String, String)]?
     @State private var anisetteError: String?
@@ -150,6 +151,17 @@ struct SettingsView: View {
                     Button(L("Reset local installer"), role: .destructive) { confirmReset = true }
                 }
 
+                Section(header: Text(L("Install log")), footer: Text(L("What iOS requested during the last install. Send a screenshot if an install fails."))) {
+                    if installLog.isEmpty {
+                        Text(L("No install yet")).font(.caption).foregroundColor(.secondary)
+                    } else {
+                        ForEach(installLog.indices, id: \.self) { i in
+                            Text(installLog[i]).font(.caption.monospaced()).textSelection(.enabled)
+                        }
+                    }
+                    Button(L("Refresh")) { installLog = InstallServer.shared.logLines() }
+                }
+
                 Section(header: Text(L("About"))) {
                     Link(destination: URL(string: "https://github.com/murk-sus/SayoSign")!) {
                         Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
@@ -170,7 +182,10 @@ struct SettingsView: View {
                     state.show(L("Local installer reset. Remove the old profile in Settings."))
                 }
             }
-            .onAppear { cacheSize = AppState.folderSize(Paths.work) }
+            .onAppear {
+                cacheSize = AppState.folderSize(Paths.work)
+                installLog = InstallServer.shared.logLines()
+            }
         }
         .navigationViewStyle(.stack)
     }
