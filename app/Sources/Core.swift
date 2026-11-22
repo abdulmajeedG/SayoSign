@@ -109,7 +109,9 @@ enum SayoCore {
         if status == errSecAuthFailed { throw SayoError(L("Wrong certificate password")) }
         guard status == errSecSuccess, let arr = items as? [[String: Any]], let first = arr.first,
               let identityRef = first[kSecImportItemIdentity as String] else {
-            throw SayoError(L("Cannot read the .p12 file") + " (\(status))")
+            // iOS refuses .p12 files made by OpenSSL 3 (AES + PBKDF2, SHA-256 MAC) with
+            // errSecDecode (-26275); the engine reads those itself.
+            return try importP12Engine(data, password: password, systemStatus: status)
         }
         let identity = identityRef as! SecIdentity
         var key: SecKey?
@@ -118,6 +120,32 @@ enum SayoCore {
         SecIdentityCopyCertificate(identity, &cert)
         guard let k = key, let c = cert else { throw SayoError(L("The .p12 has no private key")) }
         let der = SecCertificateCopyData(c) as Data
+        guard let details = certDetails(der) else { throw SayoError(L("Invalid certificate")) }
+        return Identity(key: k, certificate: der, details: details)
+    }
+
+    private static func importP12Engine(_ data: Data, password: String, systemStatus: OSStatus) throws -> Identity {
+        var cert = sayo_buf(), key = sayo_buf()
+        let rc = data.withUnsafeBytes { raw in
+            sayo_p12_parse(raw.bindMemory(to: UInt8.self).baseAddress, data.count, password, &cert, &key)
+        }
+        defer {
+            if let k = key.data { memset(k, 0, key.len) }
+            sayo_buf_free(&cert)
+            sayo_buf_free(&key)
+        }
+        if rc == -2 { throw SayoError(L("Wrong certificate password")) }
+        guard rc == 0, let cp = cert.data, let kp = key.data else {
+            throw SayoError(L("Cannot read the .p12 file") + " (\(systemStatus)): " + String(cString: sayo_last_error()))
+        }
+        let der = Data(bytes: cp, count: cert.len)
+        let pkcs1 = Data(bytes: kp, count: key.len)
+        let attrs: [String: Any] = [kSecAttrKeyType as String: kSecAttrKeyTypeRSA,
+                                    kSecAttrKeyClass as String: kSecAttrKeyClassPrivate]
+        var err: Unmanaged<CFError>?
+        guard let k = SecKeyCreateWithData(pkcs1 as CFData, attrs as CFDictionary, &err) else {
+            throw SayoError(L("The .p12 has no private key"))
+        }
         guard let details = certDetails(der) else { throw SayoError(L("Invalid certificate")) }
         return Identity(key: k, certificate: der, details: details)
     }
