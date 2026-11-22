@@ -286,3 +286,4 @@
 "SayoSign itself has this bundle ID. An app signed with this certificate cannot be installed while SayoSign uses the same ID." = "SayoSign itself has this bundle ID. An app signed with this certificate cannot be installed while SayoSign uses the same ID.";
 "Keep the app's own bundle ID" = "Keep the app's own bundle ID";
 "This profile is made for %@. The app keeps its own bundle ID, so several apps can be installed side by side; app extensions are removed." = "This profile is made for %@. The app keeps its own bundle ID, so several apps can be installed side by side; app extensions are removed.";
+"Apple's profile does not include the UDID %@. Check the UDID in Certificates → Manage Apple ID account and sign in again with the right one." = "Apple's profile does not include the UDID %@. Check the UDID in Certificates → Manage Apple ID account and sign in again with the right one.";

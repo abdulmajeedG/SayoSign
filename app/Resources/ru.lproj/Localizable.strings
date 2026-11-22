@@ -287,3 +287,4 @@
 "SayoSign itself has this bundle ID. An app signed with this certificate cannot be installed while SayoSign uses the same ID." = "У самого SayoSign такой же bundle ID. Приложение, подписанное этим сертификатом, не установится, пока SayoSign использует тот же ID.";
 "Keep the app's own bundle ID" = "Оставить свой bundle ID";
 "This profile is made for %@. The app keeps its own bundle ID, so several apps can be installed side by side; app extensions are removed." = "Профиль выписан на %@. Приложение сохранит свой bundle ID, поэтому можно ставить несколько приложений рядом; расширения приложения удаляются.";
+"Apple's profile does not include the UDID %@. Check the UDID in Certificates → Manage Apple ID account and sign in again with the right one." = "Профиль от Apple не содержит UDID %@. Проверь UDID в «Сертификаты → Управление аккаунтом Apple ID» и войди заново с правильным.";

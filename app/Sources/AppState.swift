@@ -432,6 +432,12 @@ final class AppState: ObservableObject {
             let (p, finalID) = try await AppleAccount.profile(for: c, bundleID: wanted, name: appName, anisetteURL: settings.anisetteURL)
             profile = p
             opts.bundleID = finalID
+            // A profile without this iPhone installs as "Unable to install, try later".
+            let udid = settings.udid.trimmingCharacters(in: .whitespaces).uppercased()
+            if let pd = SayoCore.profileDetails(p), !pd.allDevices, !udid.isEmpty,
+               !pd.devices.contains(where: { $0.uppercased() == udid }) {
+                throw SayoError(LF("Apple's profile does not include the UDID %@. Check the UDID in Certificates → Manage Apple ID account and sign in again with the right one.", udid))
+            }
         } else {
             guard let files = certificateFiles(c) else { throw SayoError(L("Certificate files are missing")) }
             profile = files.profile
