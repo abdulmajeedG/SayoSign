@@ -344,3 +344,5 @@
 "Run inside SayoSign" = "Запустить внутри SayoSign";
 "The IPA has no app inside" = "В IPA нет приложения";
 "Cannot prepare the app to run inside SayoSign" = "Не удалось подготовить приложение к запуску внутри SayoSign";
+"%@ expires tomorrow" = "%@ истекает завтра";
+"Re-sign it in SayoSign with your Apple ID to keep it working." = "Переподпиши его в SayoSign через Apple ID, чтобы оно продолжало работать.";

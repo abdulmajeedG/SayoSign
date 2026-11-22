@@ -343,3 +343,5 @@
 "Run inside SayoSign" = "在 SayoSign 内运行";
 "The IPA has no app inside" = "IPA 中没有应用";
 "Cannot prepare the app to run inside SayoSign" = "无法准备在 SayoSign 内运行该应用";
+"%@ expires tomorrow" = "%@ 明天到期";
+"Re-sign it in SayoSign with your Apple ID to keep it working." = "请在 SayoSign 中用你的 Apple ID 重新签名，以保持可用。";

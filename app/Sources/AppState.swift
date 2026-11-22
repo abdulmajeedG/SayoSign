@@ -1,3 +1,4 @@
+import UserNotifications
 import Foundation
 import Security
 import SwiftUI
@@ -110,6 +111,22 @@ final class AppState: ObservableObject {
             show(L("Ready to install, see Signed apps"))
         } catch {
             show(error.localizedDescription)
+        }
+    }
+
+    /// Free Apple ID signatures last 7 days: remind a day before, so the app can be re-signed in time.
+    static func remindBeforeExpiry(_ app: SignedApp) {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { ok, _ in
+            guard ok else { return }
+            let content = UNMutableNotificationContent()
+            content.title = LF("%@ expires tomorrow", app.name)
+            content.body = L("Re-sign it in SayoSign with your Apple ID to keep it working.")
+            content.sound = .default
+            let fire = app.signedAt.addingTimeInterval(6 * 24 * 3600).timeIntervalSinceNow
+            guard fire > 60 else { return }
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: fire, repeats: false)
+            center.add(UNNotificationRequest(identifier: "expiry." + app.id.uuidString, content: content, trigger: trigger))
         }
     }
 
@@ -243,6 +260,7 @@ final class AppState: ObservableObject {
     }
 
     func deleteSigned(_ app: SignedApp) {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["expiry." + app.id.uuidString])
         try? Paths.fm.removeItem(at: ipaURL(app))
         Container.remove(app)
         signed.removeAll { $0.id == app.id }
@@ -507,6 +525,7 @@ final class AppState: ObservableObject {
             }.value
             signed.insert(result, at: 0)
             save()
+            if result.viaAppleID == true { AppState.remindBeforeExpiry(result) }
             return result
         } catch {
             try? FileManager.default.removeItem(at: workRoot)
