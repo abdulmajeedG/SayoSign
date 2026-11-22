@@ -293,3 +293,8 @@
 "Detect UDID automatically" = "Определить UDID автоматически";
 "Set the manifest service in Settings → Installing first" = "Сначала укажи сервис манифестов в Настройки → Установка";
 "This Apple ID certificate was revoked, probably by signing in somewhere else. Delete it and sign in to your Apple ID again." = "Этот сертификат Apple ID отозван — скорее всего, из-за входа в другом месте. Удали его и войди в Apple ID заново.";
+"Certificate ready" = "Сертификат готов";
+"Revoke certificates" = "Отозвать сертификаты";
+"This Apple ID already has as many development certificates as Apple allows. Choose which to revoke; apps signed with a revoked certificate stop opening." = "У этого Apple ID уже максимум сертификатов разработчика, сколько разрешает Apple. Выбери, какие отозвать: приложения, подписанные отозванным сертификатом, перестанут открываться.";
+"Revoke and continue" = "Отозвать и продолжить";
+"Revoked %d certificate(s)" = "Отозвано сертификатов: %d";

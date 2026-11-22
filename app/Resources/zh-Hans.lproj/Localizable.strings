@@ -292,3 +292,8 @@
 "Detect UDID automatically" = "自动获取 UDID";
 "Set the manifest service in Settings → Installing first" = "请先在“设置 → 安装”中设置清单服务";
 "This Apple ID certificate was revoked, probably by signing in somewhere else. Delete it and sign in to your Apple ID again." = "此 Apple ID 证书已被吊销，可能是在其他地方登录导致的。请删除它并重新登录 Apple ID。";
+"Certificate ready" = "证书已就绪";
+"Revoke certificates" = "吊销证书";
+"This Apple ID already has as many development certificates as Apple allows. Choose which to revoke; apps signed with a revoked certificate stop opening." = "此 Apple ID 的开发证书数量已达 Apple 上限。请选择要吊销的证书；用被吊销证书签名的应用将无法打开。";
+"Revoke and continue" = "吊销并继续";
+"Revoked %d certificate(s)" = "已吊销 %d 个证书";

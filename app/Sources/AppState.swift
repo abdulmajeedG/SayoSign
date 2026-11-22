@@ -344,7 +344,12 @@ final class AppState: ObservableObject {
         Keychain.delete("appleid.session." + c.id.uuidString)
         Keychain.delete("appleid.password." + c.id.uuidString)
         if c.fromAppleID {
-            SecItemDelete([kSecClass as String: kSecClassKey, kSecAttrApplicationTag as String: AppleAccount.keyTag(c.id)] as CFDictionary)
+            if Keychain.get("appleid.keytag." + c.id.uuidString) != nil {
+                // The Apple ID's shared key stays for the next sign-in (iLoader-style reuse).
+                Keychain.delete("appleid.keytag." + c.id.uuidString)
+            } else {
+                SecItemDelete([kSecClass as String: kSecClassKey, kSecAttrApplicationTag as String: AppleAccount.keyTag(c.id)] as CFDictionary)
+            }
         }
         certificates.removeAll { $0.id == c.id }
         if settings.selectedCertificate == c.id { settings.selectedCertificate = certificates.first?.id }

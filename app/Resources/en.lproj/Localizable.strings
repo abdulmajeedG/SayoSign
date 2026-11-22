@@ -292,3 +292,8 @@
 "Detect UDID automatically" = "Detect UDID automatically";
 "Set the manifest service in Settings → Installing first" = "Set the manifest service in Settings → Installing first";
 "This Apple ID certificate was revoked, probably by signing in somewhere else. Delete it and sign in to your Apple ID again." = "This Apple ID certificate was revoked, probably by signing in somewhere else. Delete it and sign in to your Apple ID again.";
+"Certificate ready" = "Certificate ready";
+"Revoke certificates" = "Revoke certificates";
+"This Apple ID already has as many development certificates as Apple allows. Choose which to revoke; apps signed with a revoked certificate stop opening." = "This Apple ID already has as many development certificates as Apple allows. Choose which to revoke; apps signed with a revoked certificate stop opening.";
+"Revoke and continue" = "Revoke and continue";
+"Revoked %d certificate(s)" = "Revoked %d certificate(s)";

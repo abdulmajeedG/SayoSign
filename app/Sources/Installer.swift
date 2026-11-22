@@ -258,10 +258,16 @@ final class InstallServer {
             if let d = data { buf.append(d) }
             if let r = buf.range(of: Data("\r\n\r\n".utf8)) {
                 let head = String(decoding: buf[..<r.lowerBound], as: UTF8.self)
-                self.handle(c, head: head)
-                return
+                let body = buf[r.upperBound...]
+                let length = head.components(separatedBy: "\r\n")
+                    .first { $0.lowercased().hasPrefix("content-length:") }
+                    .flatMap { Int($0.split(separator: ":", maxSplits: 1).last?.trimmingCharacters(in: .whitespaces) ?? "") } ?? 0
+                if body.count >= min(length, 1 << 20) || done || err != nil {
+                    self.handle(c, head: head, body: Data(body))
+                    return
+                }
             }
-            if done || err != nil || buf.count > 65536 { c.cancel(); return }
+            if done || err != nil || buf.count > (1 << 20) + 65536 { c.cancel(); return }
             self.receive(c, buffer: buf)
         }
     }
@@ -274,7 +280,7 @@ final class InstallServer {
         c.send(content: out, completion: .contentProcessed { _ in if close { c.cancel() } })
     }
 
-    private func handle(_ c: NWConnection, head: String) {
+    private func handle(_ c: NWConnection, head: String, body: Data = Data()) {
         let first = head.components(separatedBy: "\r\n").first ?? ""
         let parts = first.split(separator: " ")
         guard parts.count >= 2 else { c.cancel(); return }
@@ -283,6 +289,31 @@ final class InstallServer {
         if let q = path.firstIndex(of: "?") { path = String(path[..<q]) }
         note("iOS → \(method) \(path)")
         switch path {
+        case "/udid.mobileconfig":
+            respond(c, status: "200 OK", type: "application/x-apple-aspen-config", body: InstallServer.udidProfile(base: httpBase))
+        case "/udid/receive":
+            // iOS posts a signed plist with the device attributes (Profile Service).
+            let text = String(decoding: body, as: UTF8.self)
+            var udid: String?
+            if let block = text.range(of: "<key>UDID</key>\\s*<string>[0-9A-Fa-f-]{20,50}</string>", options: .regularExpression) {
+                let piece = String(text[block])
+                if let v = piece.range(of: "[0-9A-Fa-f-]{20,50}(?=</string>)", options: .regularExpression) { udid = String(piece[v]) }
+            }
+            if let u = udid {
+                note("UDID received")
+                let to = "\(httpBase)/udid/done?u=\(u)"
+                let h = "HTTP/1.1 301 Moved Permanently\r\nLocation: \(to)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                c.send(content: Data(h.utf8), completion: .contentProcessed { _ in c.cancel() })
+                DispatchQueue.main.async { AppState.shared.handleOpen(URL(string: "sayosign://udid?value=\(u)")!) }
+            } else {
+                note("UDID: no UDID in the profile reply")
+                respond(c, status: "400 Bad Request", type: "text/plain", body: Data("no UDID".utf8))
+            }
+        case "/udid/done":
+            let q = head.components(separatedBy: "\r\n").first ?? ""
+            let u = q.range(of: "[0-9A-Fa-f-]{20,50}", options: .regularExpression).map { String(q[$0]) } ?? ""
+            let html = "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><body style='font:17px -apple-system;text-align:center;padding:40px 20px;background:#111;color:#eee'><h2>UDID</h2><p style='word-break:break-all;font-family:monospace'>\(u)</p><p><a style='display:inline-block;padding:14px 28px;border-radius:14px;background:#e8506a;color:#fff;text-decoration:none' href='sayosign://udid?value=\(u)'>Open SayoSign</a></p><script>location.href='sayosign://udid?value=\(u)'</script>"
+            respond(c, status: "200 OK", type: "text/html; charset=utf-8", body: Data(html.utf8))
         case "/ping":
             respond(c, status: "200 OK", type: "text/plain", body: Data("ok".utf8))
         case "/ca.mobileconfig":
@@ -377,6 +408,17 @@ final class InstallServer {
                 }
             }
         }
+    }
+
+    /// Profile Service request: iOS sends this iPhone's UDID to SayoSign's own server.
+    static func udidProfile(base: String) -> Data {
+        let content: [String: Any] = ["URL": "\(base)/udid/receive", "DeviceAttributes": ["UDID", "PRODUCT"]]
+        let p: [String: Any] = ["PayloadContent": content, "PayloadOrganization": "SayoSign",
+                                "PayloadDisplayName": "SayoSign UDID",
+                                "PayloadDescription": "Sends this iPhone's UDID to the SayoSign app on this iPhone. Nothing is installed.",
+                                "PayloadIdentifier": "dev.murk.sayosign.udid", "PayloadUUID": UUID().uuidString,
+                                "PayloadType": "Profile Service", "PayloadVersion": 1]
+        return (try? PropertyListSerialization.data(fromPropertyList: p, format: .xml, options: 0)) ?? Data()
     }
 
     static func silentWAV() -> Data {
