@@ -283,3 +283,5 @@
 "Install without re-signing" = "Установить без переподписи";
 "Original signature" = "Исходная подпись";
 "Ready to install, see Signed apps" = "Готово к установке — смотри подписанные приложения";
+"This app got SayoSign's own bundle ID (%@), so installing it would replace SayoSign and iOS refuses. Sign SayoSign with another certificate, or use an Apple ID or a wildcard certificate for this app." = "У этого приложения тот же bundle ID, что у самого SayoSign (%@): установка заменила бы SayoSign, и iOS отказывает. Подпиши SayoSign другим сертификатом или подпиши это приложение через Apple ID или wildcard-сертификат.";
+"SayoSign itself has this bundle ID. An app signed with this certificate cannot be installed while SayoSign uses the same ID." = "У самого SayoSign такой же bundle ID. Приложение, подписанное этим сертификатом, не установится, пока SayoSign использует тот же ID.";

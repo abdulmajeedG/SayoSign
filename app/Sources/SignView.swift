@@ -83,7 +83,12 @@ struct SignView: View {
                     }
                 }
 
-                Section(header: Text(L("App")), footer: forcedBundle.map { Text(LF("This profile only allows %@, the bundle ID will be replaced and app extensions removed.", $0)) }) {
+                Section(header: Text(L("App")), footer: forcedBundle.map { fb in
+                    Text(LF("This profile only allows %@, the bundle ID will be replaced and app extensions removed.", fb)
+                         + (fb.caseInsensitiveCompare(Bundle.main.bundleIdentifier ?? "") == .orderedSame
+                            ? "\n\n⚠️ " + L("SayoSign itself has this bundle ID. An app signed with this certificate cannot be installed while SayoSign uses the same ID.")
+                            : ""))
+                }) {
                     LabeledField(title: L("Name"), text: $name, placeholder: app.name)
                     LabeledField(title: L("Bundle ID"), text: $bundleID, placeholder: forcedBundle ?? app.bundleID)
                         .disabled(forcedBundle != nil)

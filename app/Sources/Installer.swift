@@ -420,6 +420,11 @@ enum Installer {
 
     @MainActor
     static func install(_ app: SignedApp, state: AppState) async throws {
+        // iOS refuses to replace the app that is serving the install ("Unable to install").
+        // This happens when SayoSign itself was signed with the same explicit-ID profile.
+        if let own = Bundle.main.bundleIdentifier, own.caseInsensitiveCompare(app.bundleID) == .orderedSame {
+            throw SayoError(LF("This app got SayoSign's own bundle ID (%@), so installing it would replace SayoSign and iOS refuses. Sign SayoSign with another certificate, or use an Apple ID or a wildcard certificate for this app.", own))
+        }
         let server = InstallServer.shared
         let service = manifestService(state)
         if service != nil {
