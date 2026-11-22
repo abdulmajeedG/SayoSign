@@ -762,8 +762,9 @@ struct AppleIDView: View {
                             }
                         }
                     }
-                    Section(header: Text("UDID"), footer: Text(L("Your iPhone UDID is needed to register it with Apple. Find it in Finder/iTunes or on a UDID website."))) {
+                    Section(header: Text("UDID"), footer: Text(L("Apple needs this iPhone's UDID. Tap Detect: Safari downloads a profile, open Settings → Profile Downloaded → Install, and you come back here with the UDID filled in."))) {
                         TextField("00008110-000000000000001E", text: $udid).autocapitalization(.allCharacters).disableAutocorrection(true)
+                        Button { detectUDID() } label: { Label(L("Detect UDID automatically"), systemImage: "iphone.radiowaves.left.and.right") }
                     }
                     Section {
                         Button { Task { await start() } } label: {
@@ -815,10 +816,22 @@ struct AppleIDView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("Close")) { dismiss() } } }
             .onAppear { udid = state.settings.udid }
+            .onReceive(NotificationCenter.default.publisher(for: .sayoUDID)) { n in
+                if let v = n.object as? String { udid = v }
+            }
         }
     }
 
     func add(_ s: String) { log.append(s) }
+
+    func detectUDID() {
+        guard let base = Installer.manifestService(state),
+              let u = URL(string: base.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/udid") else {
+            error = L("Set the manifest service in Settings → Installing first")
+            return
+        }
+        UIApplication.shared.open(u)
+    }
 
     func start() async {
         working = true
@@ -1094,4 +1107,8 @@ struct AppleAccountView: View {
         }
         await reload()
     }
+}
+
+extension Notification.Name {
+    static let sayoUDID = Notification.Name("dev.murk.sayosign.udid")
 }

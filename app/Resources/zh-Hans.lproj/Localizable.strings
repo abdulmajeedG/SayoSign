@@ -287,3 +287,7 @@
 "Keep the app's own bundle ID" = "保留应用自己的 bundle ID";
 "This profile is made for %@. The app keeps its own bundle ID, so several apps can be installed side by side; app extensions are removed." = "此描述文件为 %@ 创建。应用保留自己的 bundle ID，因此可以同时安装多个应用；应用扩展会被移除。";
 "Apple's profile does not include the UDID %@. Check the UDID in Certificates → Manage Apple ID account and sign in again with the right one." = "Apple 的描述文件不包含 UDID %@。请在“证书 → 管理 Apple ID 账户”中检查 UDID，并用正确的 UDID 重新登录。";
+"UDID detected" = "已获取 UDID";
+"Apple needs this iPhone's UDID. Tap Detect: Safari downloads a profile, open Settings → Profile Downloaded → Install, and you come back here with the UDID filled in." = "Apple 需要此 iPhone 的 UDID。点按“自动获取”：Safari 会下载一个描述文件，打开“设置 → 已下载描述文件 → 安装”，之后会自动返回并填好 UDID。";
+"Detect UDID automatically" = "自动获取 UDID";
+"Set the manifest service in Settings → Installing first" = "请先在“设置 → 安装”中设置清单服务";

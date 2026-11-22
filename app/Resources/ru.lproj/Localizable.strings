@@ -288,3 +288,7 @@
 "Keep the app's own bundle ID" = "Оставить свой bundle ID";
 "This profile is made for %@. The app keeps its own bundle ID, so several apps can be installed side by side; app extensions are removed." = "Профиль выписан на %@. Приложение сохранит свой bundle ID, поэтому можно ставить несколько приложений рядом; расширения приложения удаляются.";
 "Apple's profile does not include the UDID %@. Check the UDID in Certificates → Manage Apple ID account and sign in again with the right one." = "Профиль от Apple не содержит UDID %@. Проверь UDID в «Сертификаты → Управление аккаунтом Apple ID» и войди заново с правильным.";
+"UDID detected" = "UDID определён";
+"Apple needs this iPhone's UDID. Tap Detect: Safari downloads a profile, open Settings → Profile Downloaded → Install, and you come back here with the UDID filled in." = "Apple нужен UDID этого айфона. Нажми «Определить»: Safari скачает профиль, открой Настройки → «Профиль загружен» → «Установить», и ты вернёшься сюда с заполненным UDID.";
+"Detect UDID automatically" = "Определить UDID автоматически";
+"Set the manifest service in Settings → Installing first" = "Сначала укажи сервис манифестов в Настройки → Установка";

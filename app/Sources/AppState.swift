@@ -276,7 +276,12 @@ final class AppState: ObservableObject {
         if url.scheme == "sayosign" {
             let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
             let q = comps?.queryItems ?? []
-            if url.host == "anisette", let s = q.first(where: { $0.name == "server" || $0.name == "url" })?.value, !s.isEmpty {
+            if url.host == "udid", let v = q.first(where: { $0.name == "value" })?.value,
+               v.range(of: "^[0-9A-Fa-f-]{20,50}$", options: .regularExpression) != nil {
+                settings.udid = v.uppercased()
+                NotificationCenter.default.post(name: .sayoUDID, object: settings.udid)
+                show(L("UDID detected") + ": " + settings.udid)
+            } else if url.host == "anisette", let s = q.first(where: { $0.name == "server" || $0.name == "url" })?.value, !s.isEmpty {
                 settings.anisetteURL = s
                 tab = 3
                 show(L("Anisette server set") + ": " + s)
