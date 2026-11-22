@@ -18,6 +18,15 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "1.1.0",
+          "buildVersion": "2",
+          "date": "2026-11-22",
+          "localizedDescription": "Apple ID sign-in works again: anisette v3 with Mac-based servers (Apple rejects Android anisette since October 2026), clear error messages and server check in Settings. Fixed the certificate picker (files no longer greyed out, iCloud/Telegram files load). New Light / Black / System themes. Scan the QR code from SayoSign Desktop to use your PC as an anisette server.",
+          "downloadURL": "https://github.com/murk-sus/SayoSign/releases/download/v1.1.0/SayoSign.ipa",
+          "size": 1342891,
+          "minOSVersion": "15.0"
+        },
+        {
           "version": "1.0.0",
           "date": "2026-11-22",
           "localizedDescription": "First public release: .p12 and Apple ID signing, tweak injection with SayoHook, OCSP check, offline installs. English, Russian and Simplified Chinese.",
@@ -32,13 +41,22 @@
           "NSLocalNetworkUsageDescription": "SayoSign runs a tiny server on this iPhone to install signed apps."
         }
       },
-      "version": "1.0.0",
+      "version": "1.1.0",
       "versionDate": "2026-11-22",
-      "downloadURL": "https://github.com/murk-sus/SayoSign/releases/download/v1.0.0/SayoSign.ipa",
-      "size": 1284894
+      "downloadURL": "https://github.com/murk-sus/SayoSign/releases/download/v1.1.0/SayoSign.ipa",
+      "size": 1342891
     }
   ],
   "news": [
+    {
+      "title": "SayoSign 1.1 — Apple ID works again",
+      "identifier": "release-1.1.0",
+      "caption": "Anisette v3 with Mac servers, fixed certificate picker, black theme.",
+      "date": "2026-11-22",
+      "tintColor": "#F0566E",
+      "appID": "dev.murk.sayosign",
+      "notify": true
+    },
     {
       "title": "SayoSign 1.0.0",
       "identifier": "release-1.0.0",
