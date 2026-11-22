@@ -343,6 +343,44 @@ final class Anisette {
     }
 }
 
+/// Apple answers with a plist (sometimes a bare <dict>), JSON, an HTML page, nothing at all,
+/// or a gzip body without Content-Encoding, depending on the endpoint. Same rules as the desktop.
+enum AppleHTTP {
+    static func send(_ r: URLRequest) async throws -> (Int, Data) {
+        let (data, resp) = try await URLSession.shared.data(for: r)
+        return ((resp as? HTTPURLResponse)?.statusCode ?? 0, gunzipIfNeeded(data))
+    }
+
+    static func parse(_ data: Data, status: Int, where place: String) throws -> [String: Any] {
+        let body = gunzipIfNeeded(data)
+        if body.allSatisfy({ $0 == 0x20 || $0 == 0x0a || $0 == 0x0d || $0 == 0x09 }) { return [:] }
+        if let p = try? PropertyListSerialization.propertyList(from: GSAuth.plistBody(body), format: nil) {
+            return (p as? [String: Any]) ?? ["value": p]
+        }
+        if let j = try? JSONSerialization.jsonObject(with: body) {
+            return (j as? [String: Any]) ?? ["value": j]
+        }
+        let snippet = String(decoding: body.prefix(160), as: UTF8.self)
+            .replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+        throw SayoError(L("Unexpected response from Apple") + " (\(place), HTTP \(status)): " + snippet)
+    }
+
+    static func gunzipIfNeeded(_ d: Data) -> Data {
+        let b = [UInt8](d.prefix(10))
+        guard b.count == 10, b[0] == 0x1f, b[1] == 0x8b, b[2] == 8 else { return d }
+        let flags = b[3]
+        var i = 10
+        let all = [UInt8](d)
+        if flags & 4 != 0, all.count > i + 1 { i += 2 + (Int(all[i]) | (Int(all[i + 1]) << 8)) }
+        if flags & 8 != 0 { while i < all.count && all[i] != 0 { i += 1 }; i += 1 }
+        if flags & 16 != 0 { while i < all.count && all[i] != 0 { i += 1 }; i += 1 }
+        if flags & 2 != 0 { i += 2 }
+        guard i < all.count - 8 else { return d }
+        let deflated = Data(all[i..<(all.count - 8)])
+        return (try? (deflated as NSData).decompressed(using: .zlib) as Data) ?? d
+    }
+}
+
 /// Friendly text for common GrandSlam error codes.
 func grandSlamError(_ status: [String: Any]) -> SayoError? {
     let ec = (status["ec"] as? Int) ?? 0
@@ -368,6 +406,9 @@ struct AppleSession: Codable {
     var xcodeToken: String
     var expiry: Date
     var email: String
+    /// The anisette server used at sign-in. Developer requests must keep using it,
+    /// like the desktop does; older sessions have none and fall back to the setting.
+    var anisette: String? = nil
 }
 
 enum SecondFactor {
@@ -405,12 +446,12 @@ final class GSAuth {
         r.httpBody = try PropertyListSerialization.data(fromPropertyList: wrapped, format: .xml, options: 0)
         anisette.applyBase(&r)
         r.setValue("close", forHTTPHeaderField: "Connection")
-        let (data, resp) = try await URLSession.shared.data(for: r)
-        if let h = resp as? HTTPURLResponse, [500, 503].contains(h.statusCode) {
-            throw SayoError(L("Apple rejected the anisette data. Choose a Mac-based anisette server and reset anisette.") + " (HTTP \(h.statusCode))")
+        let (status, data) = try await AppleHTTP.send(r)
+        if [500, 503].contains(status) {
+            throw SayoError(L("Apple rejected the anisette data. Choose a Mac-based anisette server and reset anisette.") + " (HTTP \(status))")
         }
-        guard let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-              let resp = plist["Response"] as? [String: Any] else { throw SayoError(L("Unexpected response from Apple")) }
+        let plist = try AppleHTTP.parse(data, status: status, where: "sign-in")
+        let resp = (plist["Response"] as? [String: Any]) ?? plist
         if let st = resp["Status"] as? [String: Any], let err = grandSlamError(st) { throw err }
         return resp
     }
@@ -485,12 +526,15 @@ final class GSAuth {
     func requestCode(_ r: LoginResult, kind: SecondFactor) async throws {
         switch kind {
         case .trustedDevice:
-            _ = try await URLSession.shared.data(for: authRequest(try anisette.url("trustedDeviceSecondaryAuth"), method: "GET", r: r))
+            // Apple answers with an HTML page here; only the status matters.
+            let (status, _) = try await AppleHTTP.send(authRequest(try anisette.url("trustedDeviceSecondaryAuth"), method: "GET", r: r))
+            if status >= 400 { throw SayoError(L("Apple could not send the code to your devices") + " (HTTP \(status))") }
         case .sms:
-            _ = try await URLSession.shared.data(for: authRequest(URL(string: "https://gsa.apple.com/auth")!, method: "GET", r: r, json: true))
+            _ = try await AppleHTTP.send(authRequest(URL(string: "https://gsa.apple.com/auth")!, method: "GET", r: r, json: true))
             var req = try await authRequest(URL(string: "https://gsa.apple.com/auth/verify/phone")!, method: "PUT", r: r, json: true)
             req.httpBody = try JSONSerialization.data(withJSONObject: ["phoneNumber": ["id": 1], "mode": "sms"])
-            _ = try await URLSession.shared.data(for: req)
+            let (status, _) = try await AppleHTTP.send(req)
+            if status >= 400 { throw SayoError(L("Apple could not send the SMS code") + " (HTTP \(status))") }
         }
     }
 
@@ -499,16 +543,17 @@ final class GSAuth {
         case .trustedDevice:
             var req = try await authRequest(try anisette.url("validateCode"), method: "GET", r: r)
             req.setValue(code, forHTTPHeaderField: "security-code")
-            let (data, _) = try await URLSession.shared.data(for: req)
-            if let p = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+            let (status, data) = try await AppleHTTP.send(req)
+            if let p = try? AppleHTTP.parse(data, status: status, where: "two-factor"),
                let err = grandSlamError((p["Status"] as? [String: Any]) ?? p) {
                 throw err
             }
+            if status >= 400 { throw SayoError(L("Wrong code") + " (HTTP \(status))") }
         case .sms:
             var req = try await authRequest(URL(string: "https://gsa.apple.com/auth/verify/phone/securitycode")!, method: "POST", r: r, json: true)
             req.httpBody = try JSONSerialization.data(withJSONObject: ["phoneNumber": ["id": 1], "securityCode": ["code": code], "mode": "sms"])
-            let (_, resp) = try await URLSession.shared.data(for: req)
-            if let h = resp as? HTTPURLResponse, !(200..<300).contains(h.statusCode) { throw SayoError(L("Wrong code")) }
+            let (status, _) = try await AppleHTTP.send(req)
+            if status >= 400 { throw SayoError(L("Wrong code") + " (HTTP \(status))") }
         }
     }
 
@@ -525,7 +570,8 @@ final class GSAuth {
         }
         var exp = Date().addingTimeInterval(3600 * 24 * 7)
         if let e = x["expiry"] as? Int { exp = Date(timeIntervalSince1970: TimeInterval(e) / 1000) }
-        return AppleSession(adsid: r.adsid, idmsToken: r.idmsToken, xcodeToken: token, expiry: exp, email: email)
+        return AppleSession(adsid: r.adsid, idmsToken: r.idmsToken, xcodeToken: token, expiry: exp, email: email,
+                            anisette: anisette.server)
     }
 }
 
@@ -554,10 +600,12 @@ final class DeveloperAPI {
         r.setValue("en-us", forHTTPHeaderField: "Accept-Language")
         r.setValue(session.adsid, forHTTPHeaderField: "X-Apple-I-Identity-Id")
         r.setValue(session.xcodeToken, forHTTPHeaderField: "X-Apple-GS-Token")
-        let (data, _) = try await URLSession.shared.data(for: r)
-        guard let p = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
-            throw SayoError(L("Unexpected developer services response"))
+        let (status, data) = try await AppleHTTP.send(r)
+        let parsed = try? AppleHTTP.parse(data, status: status, where: "developer services (\(action))")
+        if (status == 401 || status == 403) && parsed?["resultCode"] == nil {
+            throw SayoError(L("Apple developer services refused the session. Sign in again.") + " (HTTP \(status))")
         }
+        let p = try parsed ?? AppleHTTP.parse(data, status: status, where: "developer services (\(action))")
         let code = (p["resultCode"] as? Int) ?? 0
         if code != 0 {
             let msg = (p["userString"] as? String) ?? (p["resultString"] as? String) ?? "error \(code)"
@@ -663,7 +711,7 @@ enum AppleAccount {
     static func profile(for cert: StoredCertificate, bundleID: String, name: String, anisetteURL: String) async throws -> (Data, String) {
         guard let s = session(for: cert.id) else { throw SayoError(L("Sign in to your Apple ID again")) }
         if s.expiry < Date() { throw SayoError(L("Your Apple ID session expired, sign in again")) }
-        let ani = try await Anisette.fetch(anisetteURL)
+        let ani = try await Anisette.fetch(s.anisette ?? anisetteURL)
         let api = DeveloperAPI(session: s, anisette: ani)
         let team = cert.profile.teamID
         let finalID = bundleID.hasSuffix("." + team) ? bundleID : bundleID + "." + team
@@ -821,7 +869,10 @@ struct AppleIDView: View {
         do {
             try await a.submitCode(code.trimmingCharacters(in: .whitespaces), r: r, kind: factor)
             add(L("Code accepted"))
+            // The trusted session only exists after signing in again.
             let again = try await a.login()
+            if again.needs2FA != nil { throw SayoError(L("Apple still asks for a code. Try signing in again.")) }
+            login = again
             try await afterLogin(again)
         } catch {
             self.error = error.localizedDescription

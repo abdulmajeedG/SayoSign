@@ -249,3 +249,7 @@
 "Tip: you can select the .p12 and the .mobileprovision together." = "Tip: you can select the .p12 and the .mobileprovision together.";
 "Too many attempts. Wait a few minutes and try again." = "Too many attempts. Wait a few minutes and try again.";
 "Warning" = "Warning";
+"Apple could not send the code to your devices" = "Apple could not send the code to your devices";
+"Apple could not send the SMS code" = "Apple could not send the SMS code";
+"Apple developer services refused the session. Sign in again." = "Apple developer services refused the session. Sign in again.";
+"Apple still asks for a code. Try signing in again." = "Apple still asks for a code. Try signing in again.";

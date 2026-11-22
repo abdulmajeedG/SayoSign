@@ -163,21 +163,20 @@ struct ImportCertificateView: View {
     @State private var profile: URL?
     @State private var password = ""
     @State private var nickname = ""
-    @State private var picking: Int?
     @State private var error: String?
 
     var body: some View {
         NavigationView {
             Form {
                 Section(header: Text(L("Files")), footer: Text(L("Tip: you can select the .p12 and the .mobileprovision together."))) {
-                    Button { picking = 0 } label: {
+                    Button { pickFiles() } label: {
                         HStack {
                             Label(L("Certificate (.p12)"), systemImage: "key.fill")
                             Spacer()
                             Text(p12?.lastPathComponent ?? L("Choose")).foregroundColor(.secondary).lineLimit(1)
                         }
                     }
-                    Button { picking = 1 } label: {
+                    Button { pickFiles() } label: {
                         HStack {
                             Label(L("Profile (.mobileprovision)"), systemImage: "doc.text.fill")
                             Spacer()
@@ -200,18 +199,6 @@ struct ImportCertificateView: View {
             .navigationTitle(L("Add certificate"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("Cancel")) { dismiss() } } }
-            .fileImporter(isPresented: Binding(get: { picking != nil }, set: { if !$0 { picking = nil } }),
-                          allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-                let which = picking
-                picking = nil
-                switch result {
-                case .failure(let e):
-                    error = e.localizedDescription
-                case .success(let urls):
-                    error = nil
-                    for u in urls { take(u, preferred: which) }
-                }
-            }
             .onAppear {
                 if p12 == nil { p12 = prefillP12 }
                 if profile == nil { profile = prefillProfile }
@@ -222,9 +209,15 @@ struct ImportCertificateView: View {
         }
     }
 
-    /// Reads a picked file even if it still lives in iCloud or another app's file provider,
-    /// then files it as the certificate or the profile by looking at its contents.
-    func take(_ u: URL, preferred: Int?) {
+    func pickFiles() {
+        FilePicker.shared.pick([.item], multiple: true) { urls in
+            error = nil
+            for u in urls { take(u) }
+        }
+    }
+
+    /// Reads a picked file (a copy the picker made for us), then files it as the certificate or the profile by looking at its contents.
+    func take(_ u: URL) {
         let scoped = u.startAccessingSecurityScopedResource()
         defer { if scoped { u.stopAccessingSecurityScopedResource() } }
         var data: Data?
@@ -251,8 +244,9 @@ struct ImportCertificateView: View {
             self.error = error.localizedDescription
             return
         }
-        if isProfile { profile = dst } else { p12 = dst; autoProfile(near: u) }
-        _ = preferred
+        // The picker hands us a private copy; its folder may hold stale files, so no autoProfile here.
+        try? FileManager.default.removeItem(at: u)
+        if isProfile { profile = dst } else { p12 = dst }
     }
 
     func autoProfile(near p: URL) {

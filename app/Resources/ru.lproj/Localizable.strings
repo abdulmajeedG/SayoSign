@@ -250,3 +250,7 @@
 "Tip: you can select the .p12 and the .mobileprovision together." = "Подсказка: можно выбрать .p12 и .mobileprovision сразу вместе.";
 "Too many attempts. Wait a few minutes and try again." = "Слишком много попыток. Подожди несколько минут.";
 "Warning" = "Внимание";
+"Apple could not send the code to your devices" = "Apple не смог отправить код на твои устройства";
+"Apple could not send the SMS code" = "Apple не смог отправить SMS с кодом";
+"Apple developer services refused the session. Sign in again." = "Сервис разработчиков Apple отклонил сессию. Войди заново.";
+"Apple still asks for a code. Try signing in again." = "Apple всё ещё просит код. Попробуй войти заново.";

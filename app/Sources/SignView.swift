@@ -22,7 +22,6 @@ struct SignView: View {
     @State private var progress: Double = 0
     @State private var stage = ""
     @State private var signing = false
-    @State private var picking: PickKind?
     @State private var done: SignedApp?
     @State private var error: String?
     @State private var setup = false
@@ -47,7 +46,7 @@ struct SignView: View {
             Form {
                 Section {
                     HStack(spacing: 14) {
-                        Button { picking = .icon } label: {
+                        Button { pick(.icon) } label: {
                             ZStack(alignment: .bottomTrailing) {
                                 AppIconView(image: iconImage ?? state.icon(for: app), size: 66)
                                 Image(systemName: "pencil.circle.fill").font(.title3).foregroundColor(Theme.rose).background(Circle().fill(Color.white))
@@ -108,7 +107,7 @@ struct SignView: View {
                             }
                         } label: { Label(L("Add saved tweak"), systemImage: "tray.full") }
                     }
-                    Button { picking = .tweak } label: { Label(L("Add tweak from Files"), systemImage: "plus") }
+                    Button { pick(.tweak) } label: { Label(L("Add tweak from Files"), systemImage: "plus") }
                 }
 
                 Section(header: Text(L("Options"))) {
@@ -116,7 +115,7 @@ struct SignView: View {
                     Toggle(L("Remove Apple Watch app"), isOn: $removeWatch)
                     Toggle(L("Remove URL schemes"), isOn: $removeSchemes)
                     Toggle(L("Enable file sharing"), isOn: $fileSharing)
-                    Button { picking = .entitlements } label: {
+                    Button { pick(.entitlements) } label: {
                         HStack {
                             Text(L("Extra entitlements"))
                             Spacer()
@@ -173,13 +172,6 @@ struct SignView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("Close")) { dismiss() } }
             }
-            .fileImporter(isPresented: Binding(get: { picking != nil }, set: { if !$0 { picking = nil } }),
-                          allowedContentTypes: pickTypes, allowsMultipleSelection: picking == .tweak) { r in
-                let kind = picking
-                picking = nil
-                guard case .success(let urls) = r else { return }
-                for u in urls { take(u, kind: kind) }
-            }
             .sheet(isPresented: $setup) { InstallSetupView().environmentObject(state) }
             .onAppear {
                 removePlugins = state.settings.autoRemovePlugins
@@ -189,12 +181,16 @@ struct SignView: View {
         .interactiveDismissDisabled(signing)
     }
 
-    var pickTypes: [UTType] {
-        switch picking {
-        case .icon: return [.png, .jpeg, .image]
-        case .tweak: return [.deb, .dylib, .folder, .data]
-        case .entitlements: return [.xml, .propertyList, .data]
-        case .none: return [.data]
+    /// The kind travels with the request, so the result is filed correctly.
+    func pick(_ kind: PickKind) {
+        let types: [UTType]
+        switch kind {
+        case .icon: types = [.png, .jpeg, .image]
+        case .tweak: types = [.deb, .dylib, .folder, .data]
+        case .entitlements: types = [.xml, .propertyList, .data]
+        }
+        FilePicker.shared.pick(types, multiple: kind == .tweak) { urls in
+            for u in urls { take(u, kind: kind) }
         }
     }
 

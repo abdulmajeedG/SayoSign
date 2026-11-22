@@ -249,3 +249,7 @@
 "Tip: you can select the .p12 and the .mobileprovision together." = "提示：可以同时选择 .p12 和 .mobileprovision。";
 "Too many attempts. Wait a few minutes and try again." = "尝试次数过多，请等几分钟再试。";
 "Warning" = "警告";
+"Apple could not send the code to your devices" = "Apple 无法将验证码发送到你的设备";
+"Apple could not send the SMS code" = "Apple 无法发送短信验证码";
+"Apple developer services refused the session. Sign in again." = "Apple 开发者服务拒绝了此会话，请重新登录。";
+"Apple still asks for a code. Try signing in again." = "Apple 仍在要求验证码，请重新登录。";
