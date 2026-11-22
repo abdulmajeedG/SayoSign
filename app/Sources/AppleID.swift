@@ -694,6 +694,13 @@ final class DeveloperAPI {
     }
 }
 
+/// Serial numbers as Apple lists them vs. as read from the certificate (case, colons, leading zeros).
+func sameSerial(_ a: String, _ b: String) -> Bool {
+    func norm(_ s: String) -> Substring { s.uppercased().replacingOccurrences(of: ":", with: "").drop { $0 == "0" } }
+    let x = norm(a), y = norm(b)
+    return !x.isEmpty && x == y
+}
+
 enum AppleAccount {
     static func keyTag(_ id: UUID) -> Data { Data("dev.murk.sayosign.appleid.\(id.uuidString)".utf8) }
 
@@ -714,6 +721,12 @@ enum AppleAccount {
         let ani = try await Anisette.fetch(s.anisette ?? anisetteURL)
         let api = DeveloperAPI(session: s, anisette: ani)
         let team = cert.profile.teamID
+        // Signing in again (here, on the desktop or in another sideloading tool) can revoke
+        // this certificate; a revoked one only shows up as "Unable to install" later.
+        let alive = try await api.call("listAllDevelopmentCerts", ["teamId": team])["certificates"] as? [[String: Any]] ?? []
+        if !alive.contains(where: { sameSerial(($0["serialNumber"] as? String) ?? "", cert.details.serial) }) {
+            throw SayoError(L("This Apple ID certificate was revoked, probably by signing in somewhere else. Delete it and sign in to your Apple ID again."))
+        }
         let finalID = bundleID.hasSuffix("." + team) ? bundleID : bundleID + "." + team
         let data = try await api.profile(team: team, bundleID: finalID, name: name)
         return (data, finalID)
@@ -1050,10 +1063,7 @@ struct AppleAccountView: View {
         }
     }
 
-    func isMine(_ serial: String) -> Bool {
-        let a = serial.uppercased().drop { $0 == "0" }, b = cert.details.serial.uppercased().replacingOccurrences(of: ":", with: "").drop { $0 == "0" }
-        return !a.isEmpty && a == b
-    }
+    func isMine(_ serial: String) -> Bool { sameSerial(serial, cert.details.serial) }
 
     func connect() async throws -> DeveloperAPI {
         if let a = api { return a }
