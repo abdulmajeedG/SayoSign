@@ -50,6 +50,9 @@ struct LibraryView: View {
                             LibraryRow(app: app)
                                 .contextMenu {
                                     Button { state.pendingSign = app } label: { Label(L("Sign"), systemImage: "signature") }
+                                    Button { Task { await state.addUnsigned(app) } } label: {
+                                        Label(L("Install without re-signing"), systemImage: "arrow.down.app")
+                                    }
                                     Button(role: .destructive) { state.deleteLibrary(app) } label: { Label(L("Delete"), systemImage: "trash") }
                                 }
                         }

@@ -280,3 +280,6 @@
 "Hide UDIDs" = "Скрыть UDID";
 "Show UDIDs" = "Показать UDID";
 "Manage Apple ID account" = "Управление аккаунтом Apple ID";
+"Install without re-signing" = "Установить без переподписи";
+"Original signature" = "Исходная подпись";
+"Ready to install, see Signed apps" = "Готово к установке — смотри подписанные приложения";

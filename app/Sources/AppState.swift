@@ -83,6 +83,36 @@ final class AppState: ObservableObject {
         Paths.library.appendingPathComponent(app.id.uuidString).appendingPathComponent("Payload").appendingPathComponent(app.appFolder)
     }
 
+    /// Puts an imported IPA among the signed apps exactly as it is, so an IPA signed
+    /// elsewhere can go through SayoSign's installer without being re-signed.
+    func addUnsigned(_ app: LibraryApp) async {
+        let root = Paths.library.appendingPathComponent(app.id.uuidString)
+        let appDir = appURL(app)
+        let level = Int32(settings.compressionLevel)
+        busy = L("Preparing")
+        defer { busy = nil }
+        do {
+            let result: SignedApp = try await Task.detached(priority: .userInitiated) {
+                let info = NSDictionary(contentsOf: appDir.appendingPathComponent("Info.plist")) as? [String: Any] ?? [:]
+                let bid = info["CFBundleIdentifier"] as? String ?? app.bundleID
+                let ver = info["CFBundleShortVersionString"] as? String ?? app.version
+                let name = (info["CFBundleDisplayName"] as? String) ?? app.name
+                let safe = name.replacingOccurrences(of: "/", with: "-")
+                let fileName = "\(safe)_\(ver)_asis_\(UUID().uuidString.prefix(6)).ipa"
+                let out = Paths.signed.appendingPathComponent(fileName)
+                try SayoCore.zip(root, to: out, level: level)
+                let size = (try? FileManager.default.attributesOfItem(atPath: out.path)[.size] as? NSNumber)?.int64Value ?? 0
+                return SignedApp(id: UUID(), libraryID: app.id, name: name, bundleID: bid, version: ver,
+                                 certificateName: L("Original signature"), signedAt: Date(), ipaFile: fileName, size: size, tweaks: [])
+            }.value
+            signed.insert(result, at: 0)
+            save()
+            show(L("Ready to install, see Signed apps"))
+        } catch {
+            show(error.localizedDescription)
+        }
+    }
+
     func ipaURL(_ app: SignedApp) -> URL {
         Paths.signed.appendingPathComponent(app.ipaFile)
     }

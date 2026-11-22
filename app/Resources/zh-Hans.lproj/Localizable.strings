@@ -279,3 +279,6 @@
 "Hide UDIDs" = "隐藏 UDID";
 "Show UDIDs" = "显示 UDID";
 "Manage Apple ID account" = "管理 Apple ID 账户";
+"Install without re-signing" = "不重新签名直接安装";
+"Original signature" = "原始签名";
+"Ready to install, see Signed apps" = "已准备好安装，请查看已签名应用";

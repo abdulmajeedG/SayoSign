@@ -279,3 +279,6 @@
 "Hide UDIDs" = "Hide UDIDs";
 "Show UDIDs" = "Show UDIDs";
 "Manage Apple ID account" = "Manage Apple ID account";
+"Install without re-signing" = "Install without re-signing";
+"Original signature" = "Original signature";
+"Ready to install, see Signed apps" = "Ready to install, see Signed apps";
