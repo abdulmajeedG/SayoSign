@@ -334,3 +334,12 @@
 "Type this code on the iPhone" = "在 iPhone 上输入此代码";
 "Uploading" = "正在上传";
 "Waiting for the iPhone…" = "正在等待 iPhone…";
+"Inside SayoSign" = "在 SayoSign 内";
+"Run" = "运行";
+"%@ starts when you open SayoSign again" = "再次打开 SayoSign 时将启动 %@";
+"Run inside SayoSign (experimental)" = "在 SayoSign 内运行（实验性）";
+"Like LiveContainer: not installed in iOS, no app limit. Use the same certificate SayoSign itself is signed with." = "类似 LiveContainer：不安装到 iOS，没有应用数量限制。请使用与 SayoSign 本身相同的证书签名。";
+"SayoSign closes; open it again and the app starts inside it. Close that app and open SayoSign again to come back." = "SayoSign 会关闭；再次打开它，应用将在其中启动。关闭该应用并再次打开 SayoSign 即可返回。";
+"Run inside SayoSign" = "在 SayoSign 内运行";
+"The IPA has no app inside" = "IPA 中没有应用";
+"Cannot prepare the app to run inside SayoSign" = "无法准备在 SayoSign 内运行该应用";

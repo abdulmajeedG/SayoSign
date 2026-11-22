@@ -244,6 +244,7 @@ final class AppState: ObservableObject {
 
     func deleteSigned(_ app: SignedApp) {
         try? Paths.fm.removeItem(at: ipaURL(app))
+        Container.remove(app)
         signed.removeAll { $0.id == app.id }
         save()
     }
@@ -434,6 +435,7 @@ final class AppState: ObservableObject {
         let appName = opts.displayName.isEmpty ? app.name : opts.displayName
         let certName = c.nickname
         let viaAppleID = c.fromAppleID
+        let container = options.container
         let libID = app.id
         let ident = try self.identity(for: c)
         var profile: Data
@@ -475,6 +477,14 @@ final class AppState: ObservableObject {
                    fm.fileExists(atPath: fw.path) {
                     o.hookFramework = fw
                 }
+                if o.container {
+                    // LiveContainer-style: the main executable becomes a dylib SayoSign can load.
+                    let info = NSDictionary(contentsOf: appCopy.appendingPathComponent("Info.plist")) as? [String: Any] ?? [:]
+                    guard let exe = info["CFBundleExecutable"] as? String,
+                          sayo_macho_make_dylib(appCopy.appendingPathComponent(exe).path) == 0 else {
+                        throw SayoError.last("Cannot prepare the app to run inside SayoSign")
+                    }
+                }
                 try SayoCore.signApp(app: appCopy, profile: profileData, identity: ident, options: o) { f, s in
                     Task { @MainActor in progress(f * 0.92, s) }
                 }
@@ -492,7 +502,8 @@ final class AppState: ObservableObject {
                 let size = (try? fm.attributesOfItem(atPath: out.path)[.size] as? NSNumber)?.int64Value ?? 0
                 return SignedApp(id: UUID(), libraryID: libID, name: finalName, bundleID: finalID, version: finalVersion,
                                  certificateName: certName, signedAt: Date(), ipaFile: fileName, size: size,
-                                 tweaks: tweaks.map { $0.lastPathComponent }, viaAppleID: viaAppleID)
+                                 tweaks: tweaks.map { $0.lastPathComponent }, viaAppleID: viaAppleID,
+                                 container: container ? true : nil)
             }.value
             signed.insert(result, at: 0)
             save()

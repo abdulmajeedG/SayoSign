@@ -334,3 +334,12 @@
 "Type this code on the iPhone" = "Type this code on the iPhone";
 "Uploading" = "Uploading";
 "Waiting for the iPhone…" = "Waiting for the iPhone…";
+"Inside SayoSign" = "Inside SayoSign";
+"Run" = "Run";
+"%@ starts when you open SayoSign again" = "%@ starts when you open SayoSign again";
+"Run inside SayoSign (experimental)" = "Run inside SayoSign (experimental)";
+"Like LiveContainer: not installed in iOS, no app limit. Use the same certificate SayoSign itself is signed with." = "Like LiveContainer: not installed in iOS, no app limit. Use the same certificate SayoSign itself is signed with.";
+"SayoSign closes; open it again and the app starts inside it. Close that app and open SayoSign again to come back." = "SayoSign closes; open it again and the app starts inside it. Close that app and open SayoSign again to come back.";
+"Run inside SayoSign" = "Run inside SayoSign";
+"The IPA has no app inside" = "The IPA has no app inside";
+"Cannot prepare the app to run inside SayoSign" = "Cannot prepare the app to run inside SayoSign";

@@ -1,7 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-@main
 struct SayoSignApp: App {
     @StateObject private var state = AppState.shared
     @StateObject private var certImport = CertificateImportCoordinator.shared

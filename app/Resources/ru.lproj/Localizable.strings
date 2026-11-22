@@ -335,3 +335,12 @@
 "Type this code on the iPhone" = "Введи этот код на айфоне";
 "Uploading" = "Загрузка";
 "Waiting for the iPhone…" = "Ждём айфон…";
+"Inside SayoSign" = "Внутри SayoSign";
+"Run" = "Запустить";
+"%@ starts when you open SayoSign again" = "%@ запустится, когда снова откроешь SayoSign";
+"Run inside SayoSign (experimental)" = "Запускать внутри SayoSign (эксперимент)";
+"Like LiveContainer: not installed in iOS, no app limit. Use the same certificate SayoSign itself is signed with." = "Как LiveContainer: приложение не ставится в iOS, нет лимита приложений. Подписывай тем же сертификатом, что и сам SayoSign.";
+"SayoSign closes; open it again and the app starts inside it. Close that app and open SayoSign again to come back." = "SayoSign закроется; открой его снова — и приложение запустится внутри. Чтобы вернуться, закрой приложение и снова открой SayoSign.";
+"Run inside SayoSign" = "Запустить внутри SayoSign";
+"The IPA has no app inside" = "В IPA нет приложения";
+"Cannot prepare the app to run inside SayoSign" = "Не удалось подготовить приложение к запуску внутри SayoSign";

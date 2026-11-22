@@ -37,6 +37,8 @@ struct SignedApp: Codable, Identifiable, Hashable {
     var tweaks: [String]
     /// Signed with an Apple ID certificate (free profiles need the pairing install path).
     var viaAppleID: Bool? = nil
+    /// Prepared to run inside SayoSign (LiveContainer-style), not to be installed.
+    var container: Bool? = nil
 }
 
 struct StoredCertificate: Codable, Identifiable, Hashable {

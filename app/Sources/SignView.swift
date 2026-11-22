@@ -20,6 +20,7 @@ struct SignView: View {
     @State private var removeWatch = true
     @State private var removeSchemes = false
     @State private var fileSharing = false
+    @State private var inside = false
     @State private var certID: UUID?
     @State private var progress: Double = 0
     @State private var stage = ""
@@ -130,6 +131,13 @@ struct SignView: View {
                     Toggle(L("Remove Apple Watch app"), isOn: $removeWatch)
                     Toggle(L("Remove URL schemes"), isOn: $removeSchemes)
                     Toggle(L("Enable file sharing"), isOn: $fileSharing)
+                    Toggle(isOn: $inside) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L("Run inside SayoSign (experimental)"))
+                            Text(L("Like LiveContainer: not installed in iOS, no app limit. Use the same certificate SayoSign itself is signed with."))
+                                .font(.caption2).foregroundColor(.secondary)
+                        }
+                    }
                     Button { pick(.entitlements) } label: {
                         HStack {
                             Text(L("Extra entitlements"))
@@ -151,7 +159,15 @@ struct SignView: View {
                 if let e = error {
                     Section { Text(e).foregroundColor(.red).font(.callout) }
                 }
-                if let s = done {
+                if let s = done, s.container == true {
+                    Section(footer: Text(L("SayoSign closes; open it again and the app starts inside it. Close that app and open SayoSign again to come back."))) {
+                        Button {
+                            do { try Container.run(s, ipa: state.ipaURL(s)) } catch { self.error = error.localizedDescription }
+                        } label: { Label(L("Run inside SayoSign"), systemImage: "play.fill") }
+                            .buttonStyle(PrimaryButtonStyle())
+                            .listRowBackground(Color.clear)
+                    }
+                } else if let s = done {
                     Section {
                         Button {
                             Task {
@@ -277,6 +293,7 @@ struct SignView: View {
         opts.removeWatch = removeWatch
         opts.removeURLSchemes = removeSchemes
         opts.fileSharing = fileSharing
+        opts.container = inside
         do {
             let result = try await state.performSign(app: app, cert: c, options: opts, tweaks: tweaks) { f, s in
                 self.progress = f

@@ -268,6 +268,8 @@ enum SayoCore {
         var fileSharing = false
         var minIOS = ""
         var compression: Int32 = 1
+        /// Prepare the app to run inside SayoSign (LiveContainer-style) instead of installing it.
+        var container = false
     }
 
     static func signApp(app: URL, profile: Data, identity: Identity, options o: SignOptions,

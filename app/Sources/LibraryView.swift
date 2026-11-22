@@ -211,20 +211,35 @@ struct SignedRow: View {
                         Pill(text: "v" + app.version)
                         Pill(text: app.certificateName, color: .secondary)
                         if !app.tweaks.isEmpty { Pill(text: LF("%d tweaks", app.tweaks.count), color: .purple) }
+                        if app.container == true { Pill(text: L("Inside SayoSign"), color: .teal) }
                     }
                 }
                 Spacer(minLength: 6)
                 VStack(spacing: 6) {
-                    Button {
-                        Task { await install() }
-                    } label: {
-                        if installing { ProgressView().tint(.white) } else { Text(L("Install")) }
+                    if app.container == true {
+                        Button { runInside() } label: { Text(L("Run")) }
+                            .buttonStyle(SmallButtonStyle())
+                    } else {
+                        Button {
+                            Task { await install() }
+                        } label: {
+                            if installing { ProgressView().tint(.white) } else { Text(L("Install")) }
+                        }
+                        .buttonStyle(SmallButtonStyle())
                     }
-                    .buttonStyle(SmallButtonStyle())
                     Button { share = state.ipaURL(app) } label: { Image(systemName: "square.and.arrow.up") }
                         .buttonStyle(SmallButtonStyle(filled: false))
                 }
             }
+        }
+    }
+
+    func runInside() {
+        do {
+            state.show(LF("%@ starts when you open SayoSign again", app.name))
+            try Container.run(app, ipa: state.ipaURL(app))
+        } catch {
+            state.show(error.localizedDescription)
         }
     }
 
