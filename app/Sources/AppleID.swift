@@ -356,6 +356,7 @@ func grandSlamError(_ status: [String: Any]) -> SayoError? {
         -22410: L("Too many attempts. Wait a few minutes and try again."),
         -22411: L("Apple is limiting sign-ins right now. Try again later."),
         -21669: L("Wrong code"),
+        -22421: L("Wrong code"),
     ]
     let msg = known[ec] ?? (status["em"] as? String) ?? L("Unexpected response from Apple")
     return SayoError("\(msg) (\(ec))")
