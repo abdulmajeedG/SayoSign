@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var confirmReset = false
     @State private var cacheSize: Int64 = 0
     @State private var installLog: [String] = []
+    @State private var pairing = false
     @State private var checking = false
     @State private var anisetteInfo: [(String, String)]?
     @State private var anisetteError: String?
@@ -64,6 +65,22 @@ struct SettingsView: View {
                         }
                     }
                     .padding(.vertical, 6)
+                }
+
+                Section(header: Text(L("Install method")),
+                        footer: Text(L("Free Apple ID apps can only be installed through pairing (like SideStore): iOS 27, Developer Mode and LocalDevVPN. Certificates (.p12) install over the air."))) {
+                    Picker(L("Method"), selection: $state.settings.installMethod) {
+                        Text(L("Automatic")).tag(0)
+                        Text(L("Over the air")).tag(1)
+                        Text(L("Pairing (LocalDevVPN)")).tag(2)
+                    }
+                    Button { pairing = true } label: {
+                        HStack {
+                            Label(L("Pair this iPhone"), systemImage: "iphone.and.arrow.forward")
+                            Spacer()
+                            Text(DeviceLink.isPaired ? L("Paired") : L("Not paired")).foregroundColor(.secondary)
+                        }
+                    }
                 }
 
                 Section(header: Text(L("Installing")), footer: Text(L("With a manifest service, iOS just asks to install the app; nothing to set up. Leave it empty to use the local HTTPS installer and its one-time profile."))) {
@@ -175,6 +192,7 @@ struct SettingsView: View {
             }
             .navigationTitle(L("Settings"))
             .sheet(isPresented: $setup) { InstallSetupView().environmentObject(state) }
+            .sheet(isPresented: $pairing) { PairingView().environmentObject(state) }
             .confirmationDialog(L("Reset local installer?"), isPresented: $confirmReset, titleVisibility: .visible) {
                 Button(L("Reset"), role: .destructive) {
                     InstallServer.shared.stop()

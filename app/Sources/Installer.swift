@@ -460,12 +460,38 @@ enum Installer {
         return u
     }
 
+    /// Whether this app goes through the pairing tunnel instead of an over-the-air install.
     @MainActor
-    static func install(_ app: SignedApp, state: AppState) async throws {
+    static func usesPairing(_ app: SignedApp, state: AppState) -> Bool {
+        switch state.settings.installMethod {
+        case 1: return false
+        case 2: return true
+        default: return app.viaAppleID == true && DeviceLink.isPaired
+        }
+    }
+
+    /// Installs the app. Returns true when it is already installed (pairing tunnel), false when
+    /// iOS now shows its own install prompt (over the air).
+    @MainActor
+    @discardableResult
+    static func install(_ app: SignedApp, state: AppState) async throws -> Bool {
         // iOS refuses to replace the app that is serving the install ("Unable to install").
         // This happens when SayoSign itself was signed with the same explicit-ID profile.
         if let own = Bundle.main.bundleIdentifier, own.caseInsensitiveCompare(app.bundleID) == .orderedSame {
             throw SayoError(LF("This app got SayoSign's own bundle ID (%@), so installing it would replace SayoSign and iOS refuses. Sign SayoSign with another certificate, or use an Apple ID or a wildcard certificate for this app.", own))
+        }
+        if usesPairing(app, state: state) {
+            state.busy = L("Connecting to this iPhone")
+            defer { state.busy = nil }
+            try await DeviceLink.install(ipa: state.ipaURL(app), address: state.settings.tunnelAddress, port: 49152) { pct, stage in
+                switch stage {
+                case "tunnel": state.busy = L("Connecting to this iPhone")
+                case "upload": state.busy = L("Uploading")
+                case "install": state.busy = LF("Installing %d%%", pct)
+                default: break
+                }
+            }
+            return true
         }
         let server = InstallServer.shared
         let service = manifestService(state)
@@ -505,8 +531,9 @@ enum Installer {
         server.clearLog()
         server.note(service != nil ? "Manifest from \(service!.host ?? "service"), IPA over \(server.httpBase)" : "Manifest from local HTTPS server")
         let enc = manifest.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&=?"))) ?? manifest
-        guard let u = URL(string: "itms-services://?action=download-manifest&url=\(enc)") else { return }
+        guard let u = URL(string: "itms-services://?action=download-manifest&url=\(enc)") else { return false }
         await UIApplication.shared.open(u)
+        return false
     }
 
     static func openTrollStore(_ ipa: URL) -> Bool {

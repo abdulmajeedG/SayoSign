@@ -49,7 +49,8 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
-        NSLocalNetworkUsageDescription: SayoSign runs a tiny server on this iPhone to install signed apps.
+        NSLocalNetworkUsageDescription: SayoSign runs a tiny server on this iPhone to install signed apps and to pair with this iPhone in Developer Mode.
+        NSBonjourServices: [_remotepairing-pairable-host._tcp, _remotepairing._tcp]
         LSApplicationQueriesSchemes: [itms-services, apple-magnifier, filza, santander]
         CFBundleURLTypes:
           - CFBundleURLName: dev.murk.sayosign
@@ -96,7 +97,8 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         SWIFT_OBJC_BRIDGING_HEADER: app/Sources/SayoSign-Bridging-Header.h
         HEADER_SEARCH_PATHS: ["$(SRCROOT)/core/include", "$(SRCROOT)/core/src"]
-        OTHER_LDFLAGS: ["-lz", "-lcompression"]
+        OTHER_LDFLAGS: ["-lz", "-lcompression", "-lsayoidev", "-framework", "Security"]
+        LIBRARY_SEARCH_PATHS: ["$(SRCROOT)/rust/sayoidev/target/aarch64-apple-ios/release"]
         GCC_WARN_INHIBIT_ALL_WARNINGS: "YES"
         CLANG_ENABLE_MODULES: "YES"
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: "YES"

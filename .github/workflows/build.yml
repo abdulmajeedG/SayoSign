@@ -36,6 +36,12 @@ jobs:
           echo "Using $XC"
           sudo xcode-select -s "$XC"
           xcodebuild -version
+      - name: Build the idevice bridge (Rust)
+        run: |
+          rustup target add aarch64-apple-ios
+          cd rust/sayoidev
+          IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo build --release --target aarch64-apple-ios
+          ls -la target/aarch64-apple-ios/release/libsayoidev.a
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate project

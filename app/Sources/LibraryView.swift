@@ -232,8 +232,11 @@ struct SignedRow: View {
         installing = true
         defer { installing = false }
         do {
-            try await Installer.install(app, state: state)
-            state.show(L("Confirm the install prompt, keep SayoSign open until the icon finishes"))
+            if try await Installer.install(app, state: state) {
+                state.show(LF("%@ is installed", app.name))
+            } else {
+                state.show(L("Confirm the install prompt, keep SayoSign open until the icon finishes"))
+            }
         } catch is InstallNeedsSetup {
             setup = true
         } catch {

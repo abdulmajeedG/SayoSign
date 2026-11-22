@@ -433,6 +433,7 @@ final class AppState: ObservableObject {
         let compression = Int32(settings.compressionLevel)
         let appName = opts.displayName.isEmpty ? app.name : opts.displayName
         let certName = c.nickname
+        let viaAppleID = c.fromAppleID
         let libID = app.id
         let ident = try self.identity(for: c)
         var profile: Data
@@ -491,7 +492,7 @@ final class AppState: ObservableObject {
                 let size = (try? fm.attributesOfItem(atPath: out.path)[.size] as? NSNumber)?.int64Value ?? 0
                 return SignedApp(id: UUID(), libraryID: libID, name: finalName, bundleID: finalID, version: finalVersion,
                                  certificateName: certName, signedAt: Date(), ipaFile: fileName, size: size,
-                                 tweaks: tweaks.map { $0.lastPathComponent })
+                                 tweaks: tweaks.map { $0.lastPathComponent }, viaAppleID: viaAppleID)
             }.value
             signed.insert(result, at: 0)
             save()

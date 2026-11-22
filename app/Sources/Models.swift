@@ -35,6 +35,8 @@ struct SignedApp: Codable, Identifiable, Hashable {
     var ipaFile: String
     var size: Int64
     var tweaks: [String]
+    /// Signed with an Apple ID certificate (free profiles need the pairing install path).
+    var viaAppleID: Bool? = nil
 }
 
 struct StoredCertificate: Codable, Identifiable, Hashable {
@@ -98,6 +100,10 @@ struct AppSettings: Codable, Equatable {
     /// Manifest service (a Cloudflare Worker) for installing without the local CA profile.
     /// Empty: use the on-device HTTPS server and its one-time profile.
     var manifestService = AppSettings.defaultManifestService
+    /// 0 = automatic (pairing for Apple ID apps when paired), 1 = over the air, 2 = pairing.
+    var installMethod = 0
+    /// LocalDevVPN's address of this iPhone.
+    var tunnelAddress = "10.7.0.1"
     static let defaultManifestService = "https://sayosign.afk9659-0de.workers.dev"
 
     init() {}
@@ -120,6 +126,8 @@ struct AppSettings: Codable, Equatable {
         appleIDTeam = (try? c.decodeIfPresent(String.self, forKey: .appleIDTeam)) ?? d.appleIDTeam
         appearance = (try? c.decodeIfPresent(Int.self, forKey: .appearance)) ?? d.appearance
         manifestService = (try? c.decodeIfPresent(String.self, forKey: .manifestService)) ?? d.manifestService
+        installMethod = (try? c.decodeIfPresent(Int.self, forKey: .installMethod)) ?? d.installMethod
+        tunnelAddress = (try? c.decodeIfPresent(String.self, forKey: .tunnelAddress)) ?? d.tunnelAddress
         // Servers Apple now rejects are switched to a working one.
         if Anisette.rejectedServers.contains(anisetteURL) || anisetteURL.trimmingCharacters(in: .whitespaces).isEmpty {
             anisetteURL = Anisette.defaultServer
