@@ -516,11 +516,16 @@ int sayo_srp_process(sayo_srp *s, const char *username, const uint8_t *pass_key,
     sayo_buf_append(&b, hn, 32);
     sayo_buf_append(&b, hu, 32);
     sayo_buf_append(&b, salt, sl);
-    sayo_buf_append(&b, s->A, 256);
-    sayo_buf_append(&b, Bp, 256);
+    /* In M1 and M2, A and B are hashed without leading zero bytes (unlike in u).
+     * Padding them gives a wrong proof (-22406) whenever A or B starts with 0x00. */
+    size_t az = 0, bz = 0;
+    while (az < 255 && s->A[az] == 0) az++;
+    while (bz < 255 && Bp[bz] == 0) bz++;
+    sayo_buf_append(&b, s->A + az, 256 - az);
+    sayo_buf_append(&b, Bp + bz, 256 - bz);
     sayo_buf_append(&b, s->K, 32);
     H(&b, s->M1);
-    sayo_buf_append(&b, s->A, 256);
+    sayo_buf_append(&b, s->A + az, 256 - az);
     sayo_buf_append(&b, s->M1, 32);
     sayo_buf_append(&b, s->K, 32);
     H(&b, s->M2);

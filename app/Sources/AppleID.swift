@@ -382,8 +382,17 @@ final class GSAuth {
 
     init(anisette: Anisette, email: String, password: String) {
         self.anisette = anisette
-        self.email = email
+        // Apple's SRP hashes the account name in lower case: "Name@gmail.com" gets -22406
+        // (wrong password) even with the right password.
+        self.email = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         self.password = password
+    }
+
+    /// Apple's session data is a bare <dict>...</dict> without the XML/plist wrapper.
+    static func plistBody(_ d: Data) -> Data {
+        let t = String(decoding: d.prefix(64), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.hasPrefix("<dict") || t.hasPrefix("<array") else { return d }
+        return Data("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">".utf8) + d + Data("</plist>".utf8)
     }
 
     private func post(_ body: [String: Any]) async throws -> [String: Any] {
@@ -449,7 +458,7 @@ final class GSAuth {
         let key = Crypto.hmac(K, Data("extra data key:".utf8))
         let iv = Crypto.hmac(K, Data("extra data iv:".utf8)).prefix(16)
         let dec = try Crypto.cbcDecrypt(key: key, iv: Data(iv), spd)
-        guard let sd = try PropertyListSerialization.propertyList(from: dec, format: nil) as? [String: Any],
+        guard let sd = try PropertyListSerialization.propertyList(from: Self.plistBody(dec), format: nil) as? [String: Any],
               let adsid = sd["adsid"] as? String, let idms = sd["GsIdmsToken"] as? String,
               let sk = sd["sk"] as? Data, let cc = sd["c"] as? Data else {
             throw SayoError(L("Cannot read Apple session"))
@@ -510,7 +519,7 @@ final class GSAuth {
                                    "o": "apptokens", "t": r.idmsToken, "u": r.adsid])
         guard let et = resp["et"] as? Data else { throw SayoError(L("Apple did not return an app token")) }
         let dec = try Crypto.gcmDecrypt(key: r.sk, et)
-        guard let p = try PropertyListSerialization.propertyList(from: dec, format: nil) as? [String: Any],
+        guard let p = try PropertyListSerialization.propertyList(from: Self.plistBody(dec), format: nil) as? [String: Any],
               let t = p["t"] as? [String: Any], let x = t[app] as? [String: Any], let token = x["token"] as? String else {
             throw SayoError(L("Cannot read the Xcode token"))
         }
