@@ -2,13 +2,14 @@ import SwiftUI
 import UIKit
 
 enum Theme {
-    static let coral = Color(red: 1.0, green: 0.49, blue: 0.54)
-    static let rose = Color(red: 0.94, green: 0.34, blue: 0.43)
+    static let coral = Color(red: 0.94, green: 0.34, blue: 0.43)
+    static let rose = Color(red: 0.86, green: 0.27, blue: 0.37)
     static let peach = Color(red: 1.0, green: 0.70, blue: 0.65)
     static let cream = Color(red: 1.0, green: 0.96, blue: 0.93)
     static let ribbon = Color(red: 0.87, green: 0.18, blue: 0.27)
-    static let gradient = LinearGradient(colors: [peach, coral, rose], startPoint: .topLeading, endPoint: .bottomTrailing)
-    static let soft = LinearGradient(colors: [peach.opacity(0.25), coral.opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing)
+    // Near-flat fills for a clean, ESign-style look (no heavy gradients).
+    static let gradient = LinearGradient(colors: [coral, rose], startPoint: .top, endPoint: .bottom)
+    static let soft = LinearGradient(colors: [coral.opacity(0.14), coral.opacity(0.10)], startPoint: .top, endPoint: .bottom)
 }
 
 struct Bow: Shape {
@@ -38,12 +39,12 @@ struct Card<Content: View>: View {
     init(@ViewBuilder _ content: () -> Content) { self.content = content() }
     var body: some View {
         content
-            .padding(14)
+            .padding(15)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color(.secondarySystemGroupedBackground))
-                    .shadow(color: Theme.coral.opacity(0.12), radius: 12, x: 0, y: 6)
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.primary.opacity(0.06), lineWidth: 0.5))
             )
     }
 }
@@ -97,10 +98,9 @@ struct PrimaryButtonStyle: ButtonStyle {
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.gradient))
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .opacity(configuration.isPressed ? 0.9 : 1)
-            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Theme.coral))
+            .opacity(configuration.isPressed ? 0.82 : 1)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
     }
 }
 
@@ -112,8 +112,8 @@ struct SmallButtonStyle: ButtonStyle {
             .foregroundColor(filled ? .white : Theme.rose)
             .padding(.horizontal, 14)
             .padding(.vertical, 7)
-            .background(Capsule().fill(filled ? AnyShapeStyle(Theme.gradient) : AnyShapeStyle(Theme.coral.opacity(0.14))))
-            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(filled ? AnyShapeStyle(Theme.coral) : AnyShapeStyle(Theme.coral.opacity(0.14))))
+            .opacity(configuration.isPressed ? 0.82 : 1)
     }
 }
 
