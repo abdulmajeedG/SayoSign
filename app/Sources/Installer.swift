@@ -389,6 +389,7 @@ enum Installer {
     }
 
     /// The manifest service base URL, or nil when installs go through the local HTTPS server.
+    @MainActor
     static func manifestService(_ state: AppState) -> URL? {
         var s = state.settings.manifestService.trimmingCharacters(in: .whitespacesAndNewlines)
         if s.isEmpty { return nil }
