@@ -506,7 +506,9 @@ int sayo_srp_process(sayo_srp *s, const char *username, const uint8_t *pass_key,
     uint8_t hn[32], hg[32], hu[32];
     sayo_buf_append(&b, N2048, 256);
     H(&b, hn);
-    sayo_buf_byte(&b, 2);
+    /* RFC 5054 / corecrypto: g is padded to the length of N before hashing.
+     * Hashing the single byte 0x02 gives a wrong M1 and Apple answers -22406. */
+    sayo_buf_append(&b, gp, 256);
     H(&b, hg);
     for (int i = 0; i < 32; i++) hn[i] ^= hg[i];
     sayo_buf_str(&b, username);

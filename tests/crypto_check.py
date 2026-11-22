@@ -37,7 +37,8 @@ x = int.from_bytes(H(salt, H(b":", pk)), "big")
 S = pow((B - k * pow(g, x, N)) % N, a + u * x, N)
 K = H(b(S))
 assert K.hex() == d["K"]
-M1 = H(bytes(p ^ q for p, q in zip(H(b(N)), H(b(g)))), H(b"user@x.com"), salt, b(A), b(B), K)
+# RFC 5054 / Apple corecrypto: g is padded to the length of N in H(N) xor H(g).
+M1 = H(bytes(p ^ q for p, q in zip(H(b(N)), H(b(g, 256)))), H(b"user@x.com"), salt, b(A), b(B), K)
 assert M1.hex() == d["M1"]
 assert H(b(A), M1, K).hex() == d["M2"]
 assert hmac.new(b"key", b"msg", hashlib.sha256).hexdigest() == d["HMAC"]
