@@ -284,3 +284,5 @@
 "Ready to install, see Signed apps" = "已准备好安装，请查看已签名应用";
 "This app got SayoSign's own bundle ID (%@), so installing it would replace SayoSign and iOS refuses. Sign SayoSign with another certificate, or use an Apple ID or a wildcard certificate for this app." = "此应用的 bundle ID 与 SayoSign 本身相同（%@），安装会替换 SayoSign，iOS 会拒绝。请用其他证书签名 SayoSign，或用 Apple ID 或通配符证书签名此应用。";
 "SayoSign itself has this bundle ID. An app signed with this certificate cannot be installed while SayoSign uses the same ID." = "SayoSign 本身使用此 bundle ID。只要 SayoSign 使用相同的 ID，用此证书签名的应用就无法安装。";
+"Keep the app's own bundle ID" = "保留应用自己的 bundle ID";
+"This profile is made for %@. The app keeps its own bundle ID, so several apps can be installed side by side; app extensions are removed." = "此描述文件为 %@ 创建。应用保留自己的 bundle ID，因此可以同时安装多个应用；应用扩展会被移除。";

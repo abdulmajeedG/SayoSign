@@ -131,7 +131,12 @@ static void hash_file(const char *path, uint8_t out[32], bool *ok) {
 static pl_node *bundle_ents(sctx *c, const char *bundle_id) {
     pl_node *e = pl_clone(c->ents);
     char appid[512];
-    snprintf(appid, sizeof appid, "%s.%s", c->team, bundle_id);
+    /* A wildcard profile (TEAM.*) becomes this bundle's ID. An explicit profile keeps its
+     * own application-identifier: iOS checks the signature's entitlements against the
+     * profile, not against CFBundleIdentifier, so apps keep their own bundle IDs. */
+    const char *prof_appid = pl_get_str(c->ents, "application-identifier");
+    if (prof_appid && !strchr(prof_appid, '*')) snprintf(appid, sizeof appid, "%s", prof_appid);
+    else snprintf(appid, sizeof appid, "%s.%s", c->team, bundle_id);
     pl_set(e, "application-identifier", pl_new_str(appid));
     pl_node *g = pl_get(e, "com.apple.developer.team-identifier");
     if (!g) pl_set(e, "com.apple.developer.team-identifier", pl_new_str(c->team));
@@ -455,7 +460,8 @@ int sayo_sign_app(const char *app, const uint8_t *provision, size_t provision_le
     char new_bid[512];
     if (o->bundle_id && *o->bundle_id) snprintf(new_bid, sizeof new_bid, "%s", o->bundle_id);
     else snprintf(new_bid, sizeof new_bid, "%s", old_bid);
-    if (!wildcard && *prof_bid) snprintf(new_bid, sizeof new_bid, "%s", prof_bid);
+    /* Explicit profile: use its bundle ID unless the caller asked for one (e.g. the app's own). */
+    if (!wildcard && *prof_bid && !(o->bundle_id && *o->bundle_id)) snprintf(new_bid, sizeof new_bid, "%s", prof_bid);
     else if (wildcard && strlen(prof_bid) > 1) {
         size_t pl = strlen(prof_bid) - 1;
         if (strncmp(new_bid, prof_bid, pl)) {

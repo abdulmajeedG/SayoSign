@@ -284,3 +284,5 @@
 "Ready to install, see Signed apps" = "Ready to install, see Signed apps";
 "This app got SayoSign's own bundle ID (%@), so installing it would replace SayoSign and iOS refuses. Sign SayoSign with another certificate, or use an Apple ID or a wildcard certificate for this app." = "This app got SayoSign's own bundle ID (%@), so installing it would replace SayoSign and iOS refuses. Sign SayoSign with another certificate, or use an Apple ID or a wildcard certificate for this app.";
 "SayoSign itself has this bundle ID. An app signed with this certificate cannot be installed while SayoSign uses the same ID." = "SayoSign itself has this bundle ID. An app signed with this certificate cannot be installed while SayoSign uses the same ID.";
+"Keep the app's own bundle ID" = "Keep the app's own bundle ID";
+"This profile is made for %@. The app keeps its own bundle ID, so several apps can be installed side by side; app extensions are removed." = "This profile is made for %@. The app keeps its own bundle ID, so several apps can be installed side by side; app extensions are removed.";

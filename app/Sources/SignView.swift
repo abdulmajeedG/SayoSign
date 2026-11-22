@@ -8,6 +8,8 @@ struct SignView: View {
 
     @State private var name = ""
     @State private var bundleID = ""
+    /// With an explicit-ID .p12 profile: keep each app's own bundle ID (like other signers do).
+    @State private var keepOwnID = true
     @State private var version = ""
     @State private var minIOS = ""
     @State private var iconURL: URL?
@@ -36,10 +38,13 @@ struct SignView: View {
         return state.selectedCertificate
     }
 
-    var forcedBundle: String? {
-        guard let c = cert, !c.profile.isWildcard else { return nil }
+    /// The profile's single bundle ID for an explicit .p12 profile (Apple ID profiles are made per app).
+    var explicitBundle: String? {
+        guard let c = cert, !c.fromAppleID, !c.profile.isWildcard else { return nil }
         return c.profile.bundleID
     }
+
+    var forcedBundle: String? { keepOwnID ? nil : explicitBundle }
 
     var body: some View {
         NavigationView {
@@ -83,12 +88,17 @@ struct SignView: View {
                     }
                 }
 
-                Section(header: Text(L("App")), footer: forcedBundle.map { fb in
-                    Text(LF("This profile only allows %@, the bundle ID will be replaced and app extensions removed.", fb)
-                         + (fb.caseInsensitiveCompare(Bundle.main.bundleIdentifier ?? "") == .orderedSame
-                            ? "\n\n⚠️ " + L("SayoSign itself has this bundle ID. An app signed with this certificate cannot be installed while SayoSign uses the same ID.")
-                            : ""))
+                Section(header: Text(L("App")), footer: explicitBundle.map { fb in
+                    Text(keepOwnID
+                         ? LF("This profile is made for %@. The app keeps its own bundle ID, so several apps can be installed side by side; app extensions are removed.", fb)
+                         : LF("This profile only allows %@, the bundle ID will be replaced and app extensions removed.", fb)
+                           + (fb.caseInsensitiveCompare(Bundle.main.bundleIdentifier ?? "") == .orderedSame
+                              ? "\n\n⚠️ " + L("SayoSign itself has this bundle ID. An app signed with this certificate cannot be installed while SayoSign uses the same ID.")
+                              : ""))
                 }) {
+                    if explicitBundle != nil {
+                        Toggle(L("Keep the app's own bundle ID"), isOn: $keepOwnID)
+                    }
                     LabeledField(title: L("Name"), text: $name, placeholder: app.name)
                     LabeledField(title: L("Bundle ID"), text: $bundleID, placeholder: forcedBundle ?? app.bundleID)
                         .disabled(forcedBundle != nil)
@@ -256,6 +266,8 @@ struct SignView: View {
         defer { signing = false }
         var opts = SayoCore.SignOptions()
         opts.bundleID = bundleID.trimmingCharacters(in: .whitespaces)
+        // An explicit .p12 profile would otherwise rename every app to the profile's ID.
+        if opts.bundleID.isEmpty && keepOwnID && explicitBundle != nil { opts.bundleID = app.bundleID }
         opts.displayName = name.trimmingCharacters(in: .whitespaces)
         opts.shortVersion = version.trimmingCharacters(in: .whitespaces)
         opts.minIOS = minIOS.trimmingCharacters(in: .whitespaces)
