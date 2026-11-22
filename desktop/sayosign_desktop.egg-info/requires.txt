@@ -1,0 +1,7 @@
+aiohttp>=3.9
+cryptography>=42
+pymobiledevice3>=4
+pywebview>=5
+
+[window]
+pywebview>=5

@@ -23,7 +23,7 @@
 
 - **On-device signing.** Its own signing engine is written from scratch in C: Mach-O (thin and fat), SHA-256 CodeDirectory, CMS signature, XML and DER entitlements, nested frameworks and extensions, `_CodeSignature/CodeResources`, and ZIP64 IPA packing. It has no OpenSSL and no zsign inside.
 - **Certificates.** Import a `.p12` with its `.mobileprovision`, see the team, expiry, devices and entitlements, and check **revocation live with OCSP** against Apple.
-- **Apple ID sign-in.** Use a free or paid developer account directly. SayoSign speaks GrandSlam (SRP-6a with 2FA by trusted device or SMS) and Apple Developer Services to register your device, create a certificate and fetch a profile for every app on the fly.
+- **Apple ID sign-in that works in 2026.** Use a free or paid developer account directly. SayoSign speaks GrandSlam (SRP-6a, 2FA by trusted device or SMS) and Apple Developer Services, and the **anisette v3** protocol with Mac-based servers, which Apple still accepts after its October 2026 crackdown (see below).
 - **Tweak injection.** Accepts `.dylib`, `.deb` (gzip, xz, lzma or zstd, with its own zstd decoder) and `.framework`. Substrate, ElleKit, libhooker and substitute dependencies are rewired automatically.
 - **SayoHook,** a home-made hooking framework, is shipped as `CydiaSubstrate.framework` and exports `MSHookMessageEx`, `MSHookFunction`, `MSFindSymbol`, `MSGetImageByName`, `LHHookFunctions`, `LBHookMessage` and `substitute_*`.
   - Objective-C hooks work everywhere.
@@ -31,7 +31,22 @@
 - **Offline installs.** A tiny HTTPS server on `localhost` and `itms-services` install the app. Trust comes from a certificate authority generated on your device; its private key never leaves the phone, so there are no leaked keys and no third-party servers.
 - **Sources.** AltStore, SideStore, Feather and ESign repositories with search, screenshots and one-tap download.
 - **App tweaks.** Change the name, bundle ID, version, icon and minimum iOS. You can also remove extensions, Watch apps or URL schemes, enable Files sharing, and add extra entitlements.
-- **Interface.** Pink-coral design with a little bow 🎀, Liquid Glass on iOS 26+, English, Russian and Simplified Chinese.
+- **Interface.** Clean ESign-style tabs, **Light / Black / System** themes, Liquid Glass on iOS 26+, English, Russian and Simplified Chinese.
+
+## 🍎 Apple ID and anisette in 2026
+
+Since mid-October 2026 Apple rejects anisette that does not match its client: data from **Android** libraries (`ani.sidestore.io`, `ani.sidestore.zip`, self-hosted `anisette-v3-server`) fails with `-80045`, HTTP `503` or `401`. SayoSign 1.1:
+
+- implements the **anisette v3** protocol (provisioning over WebSocket, `/v3/get_headers`, identity kept in the Keychain) with a v1 fallback;
+- sends the anisette server's own client info and user agent on every Apple request and takes endpoints from Apple's URL bag;
+- defaults to Mac-based servers (`ani.iloader.app`, `mac-ani.jkcoxson.com`, `new.ani.sidestore.io`) and moves you off rejected ones automatically;
+- shows the server's protocol, client info and device ID in **Settings → Anisette server → Check server**, and explains Apple's error codes.
+
+Have a PC? **[SayoSign Desktop](https://github.com/murk-sus/SayoSign-Desktop)** runs an anisette server on your computer: scan its QR code with the iPhone camera and SayoSign sets it up.
+
+## 🖥 Desktop app
+
+Signing from Linux, Windows or macOS now lives in its own repository: **[SayoSign Desktop](https://github.com/murk-sus/SayoSign-Desktop)** (Sideloadly-style app with Apple ID, tweak injection and an anisette server). It uses this repository's engine as a submodule.
 
 ## 📲 Install
 

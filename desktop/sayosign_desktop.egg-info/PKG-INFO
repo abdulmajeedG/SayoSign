@@ -1,3 +1,17 @@
+Metadata-Version: 2.4
+Name: sayosign-desktop
+Version: 0.1.0
+Summary: Sign and install IPA files on your iPhone from Linux, Windows or macOS
+License: GPL-3.0-or-later
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: aiohttp>=3.9
+Requires-Dist: cryptography>=42
+Requires-Dist: pymobiledevice3>=4
+Requires-Dist: pywebview>=5
+Provides-Extra: window
+Requires-Dist: pywebview>=5; extra == "window"
+
 # SayoSign Desktop
 
 Sign and install IPA files on your iPhone from **Linux**, Windows or macOS. An open alternative to Sideloadly, built on the SayoSign signing engine.
