@@ -253,3 +253,5 @@
 "Apple could not send the SMS code" = "Apple 无法发送短信验证码";
 "Apple developer services refused the session. Sign in again." = "Apple 开发者服务拒绝了此会话，请重新登录。";
 "Apple still asks for a code. Try signing in again." = "Apple 仍在要求验证码，请重新登录。";
+"With a manifest service, iOS just asks to install the app; nothing to set up. Leave it empty to use the local HTTPS installer and its one-time profile." = "使用清单服务时，iOS 只会询问是否安装应用，无需任何设置。留空则使用本地 HTTPS 安装器及其一次性描述文件。";
+"Manifest service (https://…workers.dev)" = "清单服务（https://…workers.dev）";

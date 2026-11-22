@@ -95,6 +95,9 @@ struct AppSettings: Codable, Equatable {
     var appleIDTeam = ""
     /// 0 = follow the system, 1 = light, 2 = black.
     var appearance = 0
+    /// Manifest service (a Cloudflare Worker) for installing without the local CA profile.
+    /// Empty: use the on-device HTTPS server and its one-time profile.
+    var manifestService = ""
 
     init() {}
 
@@ -115,6 +118,7 @@ struct AppSettings: Codable, Equatable {
         udid = (try? c.decodeIfPresent(String.self, forKey: .udid)) ?? d.udid
         appleIDTeam = (try? c.decodeIfPresent(String.self, forKey: .appleIDTeam)) ?? d.appleIDTeam
         appearance = (try? c.decodeIfPresent(Int.self, forKey: .appearance)) ?? d.appearance
+        manifestService = (try? c.decodeIfPresent(String.self, forKey: .manifestService)) ?? d.manifestService
         // Servers Apple now rejects are switched to a working one.
         if Anisette.rejectedServers.contains(anisetteURL) || anisetteURL.trimmingCharacters(in: .whitespaces).isEmpty {
             anisetteURL = Anisette.defaultServer

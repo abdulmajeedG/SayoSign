@@ -65,8 +65,12 @@ struct SettingsView: View {
                     .padding(.vertical, 6)
                 }
 
-                Section(header: Text(L("Installing")), footer: Text(L("SayoSign installs apps through a tiny HTTPS server running on this iPhone. It uses a certificate authority created on this device only."))) {
-                    Button { setup = true } label: { Label(L("Local installer setup"), systemImage: "lock.shield") }
+                Section(header: Text(L("Installing")), footer: Text(L("With a manifest service, iOS just asks to install the app; nothing to set up. Leave it empty to use the local HTTPS installer and its one-time profile."))) {
+                    TextField(L("Manifest service (https://…workers.dev)"), text: $state.settings.manifestService)
+                        .keyboardType(.URL).autocapitalization(.none).disableAutocorrection(true)
+                    if state.settings.manifestService.trimmingCharacters(in: .whitespaces).isEmpty {
+                        Button { setup = true } label: { Label(L("Local installer setup"), systemImage: "lock.shield") }
+                    }
                     Toggle(L("Stay alive while installing"), isOn: $state.settings.keepAliveAudio)
                     Stepper(value: $state.settings.serverPort, in: 1025...65000, step: 2) {
                         HStack { Text(L("Server port")); Spacer(); Text("\(state.settings.serverPort)").foregroundColor(.secondary) }

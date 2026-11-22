@@ -253,3 +253,5 @@
 "Apple could not send the SMS code" = "Apple could not send the SMS code";
 "Apple developer services refused the session. Sign in again." = "Apple developer services refused the session. Sign in again.";
 "Apple still asks for a code. Try signing in again." = "Apple still asks for a code. Try signing in again.";
+"With a manifest service, iOS just asks to install the app; nothing to set up. Leave it empty to use the local HTTPS installer and its one-time profile." = "With a manifest service, iOS just asks to install the app; nothing to set up. Leave it empty to use the local HTTPS installer and its one-time profile.";
+"Manifest service (https://…workers.dev)" = "Manifest service (https://…workers.dev)";

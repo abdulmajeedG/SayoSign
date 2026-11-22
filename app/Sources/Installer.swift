@@ -209,6 +209,22 @@ final class InstallServer {
         plain = l2
     }
 
+    /// Only the plain HTTP listener on 127.0.0.1: enough when the manifest comes from an
+    /// HTTPS manifest service, and needs no certificate or profile.
+    func startPlain(port: Int) throws {
+        let p = UInt16(clamping: port)
+        if plain != nil && p == self.port { return }
+        stop()
+        self.port = p
+        let pp = NWParameters.tcp
+        pp.requiredInterfaceType = .loopback
+        pp.allowLocalEndpointReuse = true
+        let l2 = try NWListener(using: pp, on: NWEndpoint.Port(rawValue: p + 1)!)
+        l2.newConnectionHandler = { [weak self] c in self?.accept(c) }
+        l2.start(queue: queue)
+        plain = l2
+    }
+
     func stop() {
         tls?.cancel()
         plain?.cancel()
@@ -372,12 +388,26 @@ enum Installer {
         (fallbackID, fallbackVersion)
     }
 
+    /// The manifest service base URL, or nil when installs go through the local HTTPS server.
+    static func manifestService(_ state: AppState) -> URL? {
+        var s = state.settings.manifestService.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.isEmpty { return nil }
+        if !s.contains("://") { s = "https://" + s }
+        guard let u = URL(string: s), u.scheme == "https" else { return nil }
+        return u
+    }
+
     @MainActor
     static func install(_ app: SignedApp, state: AppState) async throws {
         let server = InstallServer.shared
-        try server.start(port: state.settings.serverPort)
-        if !(await trusted(port: state.settings.serverPort)) {
-            throw InstallNeedsSetup()
+        let service = manifestService(state)
+        if service != nil {
+            try server.startPlain(port: state.settings.serverPort)
+        } else {
+            try server.start(port: state.settings.serverPort)
+            if !(await trusted(port: state.settings.serverPort)) {
+                throw InstallNeedsSetup()
+            }
         }
         let token = UUID().uuidString.prefix(8)
         var iconData: Data?
@@ -391,7 +421,19 @@ enum Installer {
             DispatchQueue.main.asyncAfter(deadline: .now() + 20) { server.keepAlive(false) }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 600) { server.keepAlive(false) }
-        let manifest = "\(server.httpsBase)/manifest.plist?t=\(token)"
+        var manifest = "\(server.httpsBase)/manifest.plist?t=\(token)"
+        if let base = service {
+            // The IPA comes straight from this iPhone over plain HTTP; the service only
+            // turns these parameters into the manifest iOS asks for.
+            let strict = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+            func q(_ v: String) -> String { v.addingPercentEncoding(withAllowedCharacters: strict) ?? "" }
+            let params = [("url", "\(server.httpBase)/app.ipa?t=\(token)"), ("id", app.bundleID),
+                          ("v", app.version), ("name", app.name)]
+            let query = params.map { "\($0.0)=\(q($0.1))" }.joined(separator: "&")
+            var b = base.absoluteString
+            while b.hasSuffix("/") { b.removeLast() }
+            manifest = b + "/?" + query
+        }
         let enc = manifest.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&=?"))) ?? manifest
         guard let u = URL(string: "itms-services://?action=download-manifest&url=\(enc)") else { return }
         await UIApplication.shared.open(u)
