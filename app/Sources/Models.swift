@@ -97,7 +97,8 @@ struct AppSettings: Codable, Equatable {
     var appearance = 0
     /// Manifest service (a Cloudflare Worker) for installing without the local CA profile.
     /// Empty: use the on-device HTTPS server and its one-time profile.
-    var manifestService = ""
+    var manifestService = AppSettings.defaultManifestService
+    static let defaultManifestService = "https://sayosign.afk9659-0de.workers.dev"
 
     init() {}
 
