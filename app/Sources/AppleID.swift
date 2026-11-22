@@ -66,64 +66,299 @@ enum Crypto {
     }
 }
 
-struct Anisette {
-    var headers: [String: String]
+/// Anisette client: the v3 protocol (provisioning over WebSocket + /v3/get_headers) with a
+/// v1 fallback (GET / returning JSON). Since October 2026 Apple rejects anisette that does not
+/// match the client info it was made for, so every Apple request uses the client info and the
+/// user agent that the anisette server reports at /v3/client_info.
+final class Anisette {
+    /// Mac-based servers: Apple accepts these. Android-based ones fail with -80045 or HTTP 401.
+    static let presets: [(name: String, url: String)] = [
+        ("iloader", "https://ani.iloader.app"),
+        ("jkcoxson (Mac)", "https://mac-ani.jkcoxson.com"),
+        ("SideStore (new)", "https://new.ani.sidestore.io"),
+    ]
+    static let defaultServer = "https://ani.iloader.app"
+    /// Servers that Apple now rejects; settings pointing here are migrated to the default.
+    static let rejectedServers: Set<String> = ["https://ani.sidestore.io", "https://ani.sidestore.zip",
+                                               "http://ani.sidestore.io", "https://ani.sidestore.io/"]
+    static let xcodeVersion = "27.0 (27A5218g)"
+    static let lookupURL = URL(string: "https://gsa.apple.com/grandslam/GsService2/lookup")!
 
-    static var deviceID: String {
-        if let s = UserDefaults.standard.string(forKey: "sayo.deviceid") { return s }
-        let s = UUID().uuidString.uppercased()
-        UserDefaults.standard.set(s, forKey: "sayo.deviceid")
-        return s
+    let server: String
+    private(set) var version = "v3"
+    private(set) var clientInfo = ""
+    private(set) var userAgent = ""
+    private(set) var headers: [String: String] = [:]
+    private(set) var bag: [String: String] = [:]
+    private var fetchedAt = Date.distantPast
+    private var identifier: Data
+    private var adiPB: Data?
+
+    init(server raw: String) {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while s.hasSuffix("/") { s.removeLast() }
+        if !s.isEmpty && !s.contains("://") { s = "https://" + s }
+        server = s
+        identifier = Crypto.random(16)
+        loadState()
     }
 
     static func fetch(_ server: String) async throws -> Anisette {
-        guard let url = URL(string: server) else { throw SayoError(L("Invalid anisette server")) }
-        var r = URLRequest(url: url)
-        r.timeoutInterval = 25
-        let (data, _) = try await URLSession.shared.data(for: r)
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw SayoError(L("The anisette server did not return headers. Use a v1/v3 compatible server."))
+        guard URL(string: server.isEmpty ? defaultServer : server) != nil else { throw SayoError(L("Invalid anisette server")) }
+        let a = Anisette(server: server.isEmpty ? defaultServer : server)
+        try await a.detect()
+        try await a.loadBag()
+        try await a.refresh()
+        return a
+    }
+
+    // MARK: identity (persisted per server so we provision only once)
+
+    private var stateKey: String { "anisette.v3." + Crypto.sha256(Data(server.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() }
+
+    private func loadState() {
+        guard let s = Keychain.get(stateKey), let d = s.data(using: .utf8),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: String],
+              let id = o["identifier"].flatMap({ Data(base64Encoded: $0) }), id.count == 16 else { return }
+        identifier = id
+        adiPB = o["adi_pb"].flatMap { Data(base64Encoded: $0) }
+    }
+
+    private func saveState() {
+        var o = ["identifier": identifier.base64EncodedString()]
+        if let p = adiPB { o["adi_pb"] = p.base64EncodedString() }
+        if let d = try? JSONSerialization.data(withJSONObject: o), let s = String(data: d, encoding: .utf8) {
+            Keychain.set(s, for: stateKey)
         }
+    }
+
+    func reset() {
+        identifier = Crypto.random(16)
+        adiPB = nil
+        fetchedAt = .distantPast
+        saveState()
+    }
+
+    var deviceID: String {
+        let b = [UInt8](identifier)
+        return UUID(uuid: (b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15])).uuidString.lowercased()
+    }
+    var localUserID: String { Crypto.sha256(identifier).map { String(format: "%02x", $0) }.joined() }
+    var isProvisioned: Bool { version == "v1" || adiPB != nil }
+    var isMacClient: Bool { clientInfo.contains("Mac OS X") || clientInfo.contains("macOS") }
+    var isLegacyClient: Bool { clientInfo.contains("3594.4.19") }
+
+    // MARK: discovery
+
+    private func getJSON(_ path: String, body: [String: Any]? = nil, timeout: TimeInterval = 20) async throws -> [String: Any] {
+        guard let url = URL(string: server + path) else { throw SayoError(L("Invalid anisette server")) }
+        var r = URLRequest(url: url)
+        r.timeoutInterval = timeout
+        if let b = body {
+            r.httpMethod = "POST"
+            r.httpBody = try JSONSerialization.data(withJSONObject: b)
+            r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        let (data, _) = try await URLSession.shared.data(for: r)
+        guard let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw SayoError(L("This is not an anisette server, or it is down."))
+        }
+        return o
+    }
+
+    func detect() async throws {
+        if let o = try? await getJSON("/v3/client_info", timeout: 12),
+           let ci = o["client_info"] as? String, let ua = o["user_agent"] as? String {
+            version = "v3"
+            clientInfo = ci
+            userAgent = ua
+            return
+        }
+        let o = try await getJSON("/")
+        guard o["X-Apple-I-MD"] != nil, o["X-Apple-I-MD-M"] != nil else {
+            throw SayoError(L("The anisette server response is missing machine data"))
+        }
+        version = "v1"
+        clientInfo = (o["X-MMe-Client-Info"] as? String) ?? "<MacBookPro13,3> <Mac OS X;10.12.6;16G29> <com.apple.AuthKit/1 (com.apple.akd/1.0)>"
+        userAgent = "akd/1.0 CFNetwork/811.5.4 Darwin/16.7.0"
+    }
+
+    // MARK: Apple
+
+    func applyBase(_ r: inout URLRequest, json: Bool = false) {
+        let ct = json ? "application/json" : "text/x-xml-plist"
+        r.setValue(ct, forHTTPHeaderField: "Content-Type")
+        r.setValue(ct, forHTTPHeaderField: "Accept")
+        r.setValue(clientInfo, forHTTPHeaderField: "X-Mme-Client-Info")
+        r.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        r.setValue(Anisette.xcodeVersion, forHTTPHeaderField: "X-Xcode-Version")
+        r.setValue("com.apple.gs.xcode.auth", forHTTPHeaderField: "X-Apple-App-Info")
+    }
+
+    func loadBag() async throws {
+        var r = URLRequest(url: Anisette.lookupURL)
+        applyBase(&r)
+        let (data, resp) = try await URLSession.shared.data(for: r)
+        if let h = resp as? HTTPURLResponse, h.statusCode == 401 {
+            throw SayoError(L("Apple rejected this anisette server. Choose a Mac-based server like ani.iloader.app."))
+        }
+        guard let p = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let urls = p["urls"] as? [String: Any] else { throw SayoError(L("Unexpected response from Apple")) }
+        bag = urls.compactMapValues { $0 as? String }
+    }
+
+    func url(_ key: String) throws -> URL {
+        guard let s = bag[key], let u = URL(string: s) else { throw SayoError(L("Unexpected response from Apple") + " (\(key))") }
+        return u
+    }
+
+    private func applePlist(_ url: URL, _ request: [String: Any]) async throws -> [String: Any] {
+        var r = URLRequest(url: url)
+        r.httpMethod = "POST"
+        applyBase(&r)
+        r.setValue(localUserID, forHTTPHeaderField: "X-Apple-I-MD-LU")
+        r.setValue(deviceID, forHTTPHeaderField: "X-Mme-Device-Id")
+        r.setValue(Anisette.clientTime(), forHTTPHeaderField: "X-Apple-I-Client-Time")
+        r.setValue("UTC", forHTTPHeaderField: "X-Apple-I-TimeZone")
+        r.setValue("en_US", forHTTPHeaderField: "X-Apple-Locale")
+        r.httpBody = try PropertyListSerialization.data(fromPropertyList: ["Header": [String: Any](), "Request": request], format: .xml, options: 0)
+        let (data, resp) = try await URLSession.shared.data(for: r)
+        if let h = resp as? HTTPURLResponse, h.statusCode == 401 {
+            throw SayoError(L("Apple rejected this anisette server. Choose a Mac-based server like ani.iloader.app."))
+        }
+        guard let p = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let out = p["Response"] as? [String: Any] else { throw SayoError(L("Unexpected response from Apple")) }
+        return out
+    }
+
+    // MARK: v3 provisioning
+
+    private func provision() async throws {
+        let start = try url("midStartProvisioning"), finish = try url("midFinishProvisioning")
+        let wsString = server.replacingOccurrences(of: "https://", with: "wss://").replacingOccurrences(of: "http://", with: "ws://")
+        guard let wsURL = URL(string: wsString + "/v3/provisioning_session") else { throw SayoError(L("Invalid anisette server")) }
+        let task = URLSession.shared.webSocketTask(with: wsURL)
+        task.resume()
+        defer { task.cancel(with: .normalClosure, reason: nil) }
+        func send(_ o: [String: String]) async throws {
+            let d = try JSONSerialization.data(withJSONObject: o)
+            try await task.send(.string(String(data: d, encoding: .utf8) ?? "{}"))
+        }
+        for _ in 0..<12 {
+            let msg = try await task.receive()
+            let text: String
+            switch msg {
+            case .string(let s): text = s
+            case .data(let d): text = String(data: d, encoding: .utf8) ?? ""
+            @unknown default: text = ""
+            }
+            guard let m = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { continue }
+            switch m["result"] as? String ?? "" {
+            case "GiveIdentifier":
+                try await send(["identifier": identifier.base64EncodedString()])
+            case "GiveStartProvisioningData":
+                let r = try await applePlist(start, [:])
+                guard let spim = r["spim"] as? String else { throw SayoError(L("Unexpected response from Apple")) }
+                try await send(["spim": spim])
+            case "GiveEndProvisioningData":
+                let r = try await applePlist(finish, ["cpim": m["cpim"] as? String ?? ""])
+                guard let ptm = r["ptm"] as? String, let tk = r["tk"] as? String else { throw SayoError(L("Unexpected response from Apple")) }
+                try await send(["ptm": ptm, "tk": tk])
+            case "ProvisioningSuccess":
+                guard let s = m["adi_pb"] as? String, let d = Data(base64Encoded: s) else { throw SayoError(L("Anisette provisioning failed")) }
+                adiPB = d
+                saveState()
+                return
+            case let other:
+                let detail = (m["message"] as? String).map { ": " + $0 } ?? ""
+                throw SayoError(L("Anisette provisioning failed") + " (\(other)\(detail))")
+            }
+        }
+        throw SayoError(L("Anisette provisioning failed"))
+    }
+
+    // MARK: headers
+
+    static func clientTime() -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f.string(from: Date())
+    }
+
+    func refresh() async throws {
         var h: [String: String] = [:]
-        for (k, v) in obj { if let s = v as? String { h[k] = s } else if let n = v as? NSNumber { h[k] = n.stringValue } }
+        if version == "v1" {
+            let o = try await getJSON("/")
+            for (k, v) in o { if let s = v as? String { h[k] = s } else if let n = v as? NSNumber { h[k] = n.stringValue } }
+            h["X-Apple-I-MD-LU"] = h["X-Apple-I-MD-LU"] ?? localUserID
+            h["X-Mme-Device-Id"] = h["X-Mme-Device-Id"] ?? deviceID
+        } else {
+            var got: [String: Any]?
+            for attempt in 0..<2 {
+                if adiPB == nil { try await provision() }
+                let o = try await getJSON("/v3/get_headers", body: ["identifier": identifier.base64EncodedString(),
+                                                                     "adi_pb": adiPB?.base64EncodedString() ?? ""])
+                if o["result"] as? String == "Headers" { got = o; break }
+                if attempt == 0 { reset(); continue }
+                throw SayoError(L("Anisette server error") + ": " + (o["message"] as? String ?? ""))
+            }
+            guard let o = got else { throw SayoError(L("Anisette server error")) }
+            h["X-Apple-I-MD"] = o["X-Apple-I-MD"] as? String
+            h["X-Apple-I-MD-M"] = o["X-Apple-I-MD-M"] as? String
+            h["X-Apple-I-MD-RINFO"] = (o["X-Apple-I-MD-RINFO"] as? String) ?? (o["X-Apple-I-MD-RINFO"] as? NSNumber)?.stringValue ?? "17106176"
+            h["X-Apple-I-MD-LU"] = localUserID
+            h["X-Mme-Device-Id"] = deviceID
+        }
         guard h["X-Apple-I-MD"] != nil, h["X-Apple-I-MD-M"] != nil else {
             throw SayoError(L("The anisette server response is missing machine data"))
         }
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        if h["X-Apple-I-Client-Time"] == nil { h["X-Apple-I-Client-Time"] = iso.string(from: Date()) }
-        if h["X-Apple-Locale"] == nil { h["X-Apple-Locale"] = "en_US" }
-        if h["X-Apple-I-TimeZone"] == nil { h["X-Apple-I-TimeZone"] = TimeZone.current.abbreviation() ?? "UTC" }
-        if h["X-Mme-Device-Id"] == nil { h["X-Mme-Device-Id"] = deviceID }
-        if h["X-Apple-I-MD-LU"] == nil { h["X-Apple-I-MD-LU"] = Crypto.sha256(Data(deviceID.utf8)).base64EncodedString() }
-        if h["X-Apple-I-MD-RINFO"] == nil { h["X-Apple-I-MD-RINFO"] = "17106176" }
-        if h["X-Apple-I-SRL-NO"] == nil { h["X-Apple-I-SRL-NO"] = "0" }
-        if h["X-MMe-Client-Info"] == nil && h["X-Mme-Client-Info"] == nil {
-            h["X-MMe-Client-Info"] = "<MacBookPro13,2> <macOS;13.1;22C65> <com.apple.AuthKit/1 (com.apple.dt.Xcode/3594.4.19)>"
-        }
-        return Anisette(headers: h)
+        h["X-Apple-I-SRL-NO"] = "0"
+        h["X-Apple-I-Client-Time"] = Anisette.clientTime()
+        h["X-Apple-I-TimeZone"] = "UTC"
+        h["X-Apple-Locale"] = "en_US"
+        headers = h
+        fetchedAt = Date()
     }
 
-    var clientInfo: String { headers["X-MMe-Client-Info"] ?? headers["X-Mme-Client-Info"] ?? "" }
+    /// One-time passwords live about a minute; refresh before a request if needed.
+    func fresh() async throws {
+        if Date().timeIntervalSince(fetchedAt) > 40 { try await refresh() }
+    }
+
+    private static let anisetteKeys = ["X-Apple-I-Client-Time", "X-Apple-I-MD", "X-Apple-I-MD-M", "X-Apple-I-MD-LU",
+                                       "X-Apple-I-MD-RINFO", "X-Apple-I-SRL-NO", "X-Apple-I-TimeZone", "X-Apple-Locale", "X-Mme-Device-Id"]
 
     var cpd: [String: Any] {
-        var d: [String: Any] = ["bootstrap": true, "icscrec": true, "pbe": false, "prkgen": true, "svct": "iCloud",
-                                "loc": headers["X-Apple-Locale"] ?? "en_US"]
-        for k in ["X-Apple-I-Client-Time", "X-Apple-I-MD", "X-Apple-I-MD-M", "X-Apple-I-MD-LU", "X-Apple-I-MD-RINFO",
-                  "X-Apple-I-SRL-NO", "X-Apple-I-TimeZone", "X-Apple-Locale", "X-Mme-Device-Id"] {
-            if let v = headers[k] { d[k] = v }
-        }
+        var d: [String: Any] = ["bootstrap": true, "icscrec": true, "pbe": false, "prkgen": true, "svct": "iCloud", "loc": "en_US"]
+        for k in Anisette.anisetteKeys { if let v = headers[k] { d[k] = v } }
         return d
     }
 
-    func apply(_ r: inout URLRequest) {
-        for k in ["X-Apple-I-Client-Time", "X-Apple-I-MD", "X-Apple-I-MD-M", "X-Apple-I-MD-LU", "X-Apple-I-MD-RINFO",
-                  "X-Apple-I-SRL-NO", "X-Apple-I-TimeZone", "X-Apple-Locale", "X-Mme-Device-Id"] {
-            if let v = headers[k] { r.setValue(v, forHTTPHeaderField: k) }
-        }
-        r.setValue(clientInfo, forHTTPHeaderField: "X-MMe-Client-Info")
-        r.setValue(headers["X-Apple-Locale"] ?? "en_US", forHTTPHeaderField: "Loc")
+    /// Base headers plus the anisette headers, for 2FA and developer requests.
+    func apply(_ r: inout URLRequest, json: Bool = false) {
+        applyBase(&r, json: json)
+        for k in Anisette.anisetteKeys { if let v = headers[k] { r.setValue(v, forHTTPHeaderField: k) } }
+        r.setValue("en_US", forHTTPHeaderField: "Loc")
     }
+}
+
+/// Friendly text for common GrandSlam error codes.
+func grandSlamError(_ status: [String: Any]) -> SayoError? {
+    let ec = (status["ec"] as? Int) ?? 0
+    if ec == 0 { return nil }
+    let known: [Int: String] = [
+        -20101: L("Wrong Apple ID or password"), -22406: L("Wrong Apple ID or password"),
+        -20209: L("This Apple ID is locked. Unlock it at iforgot.apple.com"), -20751: L("This Apple ID is locked. Unlock it at iforgot.apple.com"),
+        -80045: L("Apple rejected the anisette data. Choose a Mac-based anisette server and reset anisette."),
+        -80046: L("Apple rejected the anisette data. Choose a Mac-based anisette server and reset anisette."),
+        -45061: L("Anisette is not provisioned for this server. Reset anisette and try again."),
+        -22410: L("Too many attempts. Wait a few minutes and try again."),
+        -22411: L("Apple is limiting sign-ins right now. Try again later."),
+        -21669: L("Wrong code"),
+    ]
+    let msg = known[ec] ?? (status["em"] as? String) ?? L("Unexpected response from Apple")
+    return SayoError("\(msg) (\(ec))")
 }
 
 struct AppleSession: Codable {
@@ -143,7 +378,6 @@ final class GSAuth {
     let anisette: Anisette
     let email: String
     let password: String
-    private let gsa = URL(string: "https://gsa.apple.com/grandslam/GsService2")!
 
     init(anisette: Anisette, email: String, password: String) {
         self.anisette = anisette
@@ -152,20 +386,22 @@ final class GSAuth {
     }
 
     private func post(_ body: [String: Any]) async throws -> [String: Any] {
-        let wrapped: [String: Any] = ["Header": ["Version": "1.0.1"], "Request": body]
-        var r = URLRequest(url: gsa)
+        try await anisette.fresh()
+        var request = body
+        request["cpd"] = anisette.cpd
+        let wrapped: [String: Any] = ["Header": ["Version": "1.0.1"], "Request": request]
+        var r = URLRequest(url: try anisette.url("gsService"))
         r.httpMethod = "POST"
         r.httpBody = try PropertyListSerialization.data(fromPropertyList: wrapped, format: .xml, options: 0)
-        r.setValue("text/x-xml-plist", forHTTPHeaderField: "Content-Type")
-        r.setValue("*/*", forHTTPHeaderField: "Accept")
-        r.setValue("akd/1.0 CFNetwork/978.0.7 Darwin/18.7.0", forHTTPHeaderField: "User-Agent")
-        r.setValue(anisette.clientInfo, forHTTPHeaderField: "X-MMe-Client-Info")
-        let (data, _) = try await URLSession.shared.data(for: r)
+        anisette.applyBase(&r)
+        r.setValue("close", forHTTPHeaderField: "Connection")
+        let (data, resp) = try await URLSession.shared.data(for: r)
+        if let h = resp as? HTTPURLResponse, [500, 503].contains(h.statusCode) {
+            throw SayoError(L("Apple rejected the anisette data. Choose a Mac-based anisette server and reset anisette.") + " (HTTP \(h.statusCode))")
+        }
         guard let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
               let resp = plist["Response"] as? [String: Any] else { throw SayoError(L("Unexpected response from Apple")) }
-        if let st = resp["Status"] as? [String: Any], let ec = st["ec"] as? Int, ec != 0 {
-            throw SayoError((st["em"] as? String) ?? "Apple error \(ec)")
-        }
+        if let st = resp["Status"] as? [String: Any], let err = grandSlamError(st) { throw err }
         return resp
     }
 
@@ -185,7 +421,7 @@ final class GSAuth {
             sayo_srp_init(&srp, rnd)
             A = withUnsafeBytes(of: srp.A) { Data($0) }
         } while A.first == 0
-        let initResp = try await post(["A2k": A, "cpd": anisette.cpd, "o": "init", "ps": ["s2k", "s2k_fo"], "u": email])
+        let initResp = try await post(["A2k": A, "o": "init", "ps": ["s2k", "s2k_fo"], "u": email])
         guard let sp = initResp["sp"] as? String, let iter = initResp["i"] as? Int,
               let salt = initResp["s"] as? Data, let B = initResp["B"] as? Data, let c = initResp["c"] as? String else {
             throw SayoError(L("Apple did not accept the login request"))
@@ -206,12 +442,7 @@ final class GSAuth {
         let M1 = withUnsafeBytes(of: srp.M1) { Data($0) }
         let M2 = withUnsafeBytes(of: srp.M2) { Data($0) }
         let K = withUnsafeBytes(of: srp.K) { Data($0) }
-        let complete: [String: Any]
-        do {
-            complete = try await post(["M1": M1, "c": c, "cpd": anisette.cpd, "o": "complete", "u": email])
-        } catch {
-            throw SayoError(L("Wrong Apple ID or password") + " (\(error.localizedDescription))")
-        }
+        let complete = try await post(["M1": M1, "c": c, "o": "complete", "u": email])
         if let serverM2 = complete["M2"] as? Data, serverM2 != M2 { throw SayoError(L("Apple server proof mismatch")) }
         guard let spd = complete["spd"] as? Data else { throw SayoError(L("Apple did not send session data")) }
         let key = Crypto.hmac(K, Data("extra data key:".utf8))
@@ -226,31 +457,28 @@ final class GSAuth {
         if let st = complete["Status"] as? [String: Any], let au = st["au"] as? String {
             if au == "trustedDeviceSecondaryAuth" { second = .trustedDevice }
             else if au == "secondaryAuth" { second = .sms }
+            else if au != "repair" { throw SayoError(L("Apple asks for an extra step. Finish it on appleid.apple.com and try again.") + " (\(au))") }
         }
         return LoginResult(adsid: adsid, idmsToken: idms, sk: sk, c: cc, needs2FA: second)
     }
 
-    private func authRequest(_ url: String, method: String, r: LoginResult, json: Bool = false) -> URLRequest {
-        var req = URLRequest(url: URL(string: url)!)
+    private func authRequest(_ url: URL, method: String, r: LoginResult, json: Bool = false) async throws -> URLRequest {
+        try await anisette.fresh()
+        var req = URLRequest(url: url)
         req.httpMethod = method
+        anisette.apply(&req, json: json)
         let ident = Data("\(r.adsid):\(r.idmsToken)".utf8).base64EncodedString()
         req.setValue(ident, forHTTPHeaderField: "X-Apple-Identity-Token")
-        req.setValue("com.apple.gs.xcode.auth", forHTTPHeaderField: "X-Apple-App-Info")
-        req.setValue("11.2 (11B41)", forHTTPHeaderField: "X-Xcode-Version")
-        req.setValue(json ? "application/json" : "text/x-xml-plist", forHTTPHeaderField: "Content-Type")
-        req.setValue(json ? "application/json" : "text/x-xml-plist", forHTTPHeaderField: "Accept")
-        req.setValue("Xcode", forHTTPHeaderField: "User-Agent")
-        anisette.apply(&req)
         return req
     }
 
     func requestCode(_ r: LoginResult, kind: SecondFactor) async throws {
         switch kind {
         case .trustedDevice:
-            _ = try await URLSession.shared.data(for: authRequest("https://gsa.apple.com/auth/verify/trusteddevice", method: "GET", r: r))
+            _ = try await URLSession.shared.data(for: authRequest(try anisette.url("trustedDeviceSecondaryAuth"), method: "GET", r: r))
         case .sms:
-            _ = try await URLSession.shared.data(for: authRequest("https://gsa.apple.com/auth", method: "GET", r: r, json: true))
-            var req = authRequest("https://gsa.apple.com/auth/verify/phone", method: "PUT", r: r, json: true)
+            _ = try await URLSession.shared.data(for: authRequest(URL(string: "https://gsa.apple.com/auth")!, method: "GET", r: r, json: true))
+            var req = try await authRequest(URL(string: "https://gsa.apple.com/auth/verify/phone")!, method: "PUT", r: r, json: true)
             req.httpBody = try JSONSerialization.data(withJSONObject: ["phoneNumber": ["id": 1], "mode": "sms"])
             _ = try await URLSession.shared.data(for: req)
         }
@@ -259,15 +487,15 @@ final class GSAuth {
     func submitCode(_ code: String, r: LoginResult, kind: SecondFactor) async throws {
         switch kind {
         case .trustedDevice:
-            var req = authRequest("https://gsa.apple.com/grandslam/GsService2/validate", method: "GET", r: r)
+            var req = try await authRequest(try anisette.url("validateCode"), method: "GET", r: r)
             req.setValue(code, forHTTPHeaderField: "security-code")
             let (data, _) = try await URLSession.shared.data(for: req)
             if let p = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-               let ec = p["ec"] as? Int, ec != 0 {
-                throw SayoError((p["em"] as? String) ?? L("Wrong code"))
+               let err = grandSlamError((p["Status"] as? [String: Any]) ?? p) {
+                throw err
             }
         case .sms:
-            var req = authRequest("https://gsa.apple.com/auth/verify/phone/securitycode", method: "POST", r: r, json: true)
+            var req = try await authRequest(URL(string: "https://gsa.apple.com/auth/verify/phone/securitycode")!, method: "POST", r: r, json: true)
             req.httpBody = try JSONSerialization.data(withJSONObject: ["phoneNumber": ["id": 1], "securityCode": ["code": code], "mode": "sms"])
             let (_, resp) = try await URLSession.shared.data(for: req)
             if let h = resp as? HTTPURLResponse, !(200..<300).contains(h.statusCode) { throw SayoError(L("Wrong code")) }
@@ -277,7 +505,7 @@ final class GSAuth {
     func xcodeToken(_ r: LoginResult) async throws -> AppleSession {
         let app = "com.apple.gs.xcode.auth"
         let checksum = Crypto.hmac(r.sk, Data(("apptokens" + r.adsid + app).utf8))
-        let resp = try await post(["app": [app], "c": r.c, "checksum": checksum, "cpd": anisette.cpd,
+        let resp = try await post(["app": [app], "c": r.c, "checksum": checksum,
                                    "o": "apptokens", "t": r.idmsToken, "u": r.adsid])
         guard let et = resp["et"] as? Data else { throw SayoError(L("Apple did not return an app token")) }
         let dec = try Crypto.gcmDecrypt(key: r.sk, et)
@@ -302,6 +530,7 @@ final class DeveloperAPI {
     }
 
     func call(_ action: String, ios: Bool = true, _ params: [String: Any] = [:]) async throws -> [String: Any] {
+        try await anisette.fresh()
         let path = ios ? "ios/\(action).action" : "\(action).action"
         var r = URLRequest(url: URL(string: "https://developerservices2.apple.com/services/QH65B2/\(path)?clientId=\(DeveloperAPI.clientID)")!)
         r.httpMethod = "POST"
@@ -309,16 +538,12 @@ final class DeveloperAPI {
         body["clientId"] = DeveloperAPI.clientID
         body["protocolVersion"] = "QH65B2"
         body["requestId"] = UUID().uuidString.uppercased()
+        body["userLocale"] = ["en_US"]
         r.httpBody = try PropertyListSerialization.data(fromPropertyList: body, format: .xml, options: 0)
-        r.setValue("text/x-xml-plist", forHTTPHeaderField: "Content-Type")
-        r.setValue("text/x-xml-plist", forHTTPHeaderField: "Accept")
+        anisette.apply(&r)
         r.setValue("en-us", forHTTPHeaderField: "Accept-Language")
-        r.setValue("Xcode", forHTTPHeaderField: "User-Agent")
-        r.setValue("com.apple.gs.xcode.auth", forHTTPHeaderField: "X-Apple-App-Info")
-        r.setValue("11.2 (11B41)", forHTTPHeaderField: "X-Xcode-Version")
         r.setValue(session.adsid, forHTTPHeaderField: "X-Apple-I-Identity-Id")
         r.setValue(session.xcodeToken, forHTTPHeaderField: "X-Apple-GS-Token")
-        anisette.apply(&r)
         let (data, _) = try await URLSession.shared.data(for: r)
         guard let p = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
             throw SayoError(L("Unexpected developer services response"))
@@ -370,7 +595,7 @@ final class DeveloperAPI {
         let submit: [String: Any]
         do {
             submit = try await call("submitDevelopmentCSR", ["teamId": team, "csrContent": pem,
-                                                              "machineId": Anisette.deviceID, "machineName": "SayoSign"])
+                                                              "machineId": anisette.deviceID.uppercased(), "machineName": "SayoSign"])
         } catch {
             if let oldest = existing.first, let serial = oldest["serialNumber"] as? String {
                 _ = try? await call("revokeDevelopmentCert", ["teamId": team, "serialNumber": serial])
@@ -471,6 +696,14 @@ struct AppleIDView: View {
                         TextField("email@icloud.com", text: $email).keyboardType(.emailAddress).autocapitalization(.none).disableAutocorrection(true)
                         SecureField(L("Password"), text: $password)
                     }
+                    Section(header: Text(L("Anisette server")), footer: Text(L("Apple only accepts Mac-based anisette servers since October 2026."))) {
+                        Picker(L("Server"), selection: $state.settings.anisetteURL) {
+                            ForEach(Anisette.presets, id: \.url) { p in Text(p.name).tag(p.url) }
+                            if !Anisette.presets.contains(where: { $0.url == state.settings.anisetteURL }) {
+                                Text(state.settings.anisetteURL).tag(state.settings.anisetteURL)
+                            }
+                        }
+                    }
                     Section(header: Text("UDID"), footer: Text(L("Your iPhone UDID is needed to register it with Apple. Find it in Finder/iTunes or on a UDID website."))) {
                         TextField("00008110-000000000000001E", text: $udid).autocapitalization(.allCharacters).disableAutocorrection(true)
                     }
@@ -537,10 +770,19 @@ struct AppleIDView: View {
         do {
             let ani = try await Anisette.fetch(state.settings.anisetteURL)
             anisette = ani
-            add(L("Got anisette data"))
+            add(L("Got anisette data") + " (\(ani.version)\(ani.isMacClient ? ", Mac" : ""))")
             let a = GSAuth(anisette: ani, email: email.trimmingCharacters(in: .whitespaces), password: password)
             auth = a
-            let r = try await a.login()
+            let r: GSAuth.LoginResult
+            do {
+                r = try await a.login()
+            } catch let e as SayoError where e.message.contains("-45061") || e.message.contains("-80045") || e.message.contains("-80046") {
+                // Stale or rejected provisioning: start a fresh identity once and retry.
+                ani.reset()
+                try await ani.refresh()
+                add(L("Anisette was reset"))
+                r = try await a.login()
+            }
             login = r
             add(L("Password accepted"))
             if let f = r.needs2FA {

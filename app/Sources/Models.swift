@@ -88,11 +88,38 @@ struct AppSettings: Codable, Equatable {
     var removeWatchApps = true
     var deleteAfterInstall = false
     var serverPort: Int = 47616
-    var anisetteURL = "https://ani.sidestore.io"
+    var anisetteURL = Anisette.defaultServer
     var bundleSuffix = ""
     var keepAliveAudio = true
     var udid = ""
     var appleIDTeam = ""
+    /// 0 = follow the system, 1 = light, 2 = black.
+    var appearance = 0
+
+    init() {}
+
+    // Decoding field by field keeps older saved settings (and the whole library) readable
+    // when new fields are added, instead of failing and resetting everything.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = AppSettings()
+        selectedCertificate = (try? c.decodeIfPresent(UUID.self, forKey: .selectedCertificate)) ?? nil
+        compressionLevel = (try? c.decodeIfPresent(Int.self, forKey: .compressionLevel)) ?? d.compressionLevel
+        autoRemovePlugins = (try? c.decodeIfPresent(Bool.self, forKey: .autoRemovePlugins)) ?? d.autoRemovePlugins
+        removeWatchApps = (try? c.decodeIfPresent(Bool.self, forKey: .removeWatchApps)) ?? d.removeWatchApps
+        deleteAfterInstall = (try? c.decodeIfPresent(Bool.self, forKey: .deleteAfterInstall)) ?? d.deleteAfterInstall
+        serverPort = (try? c.decodeIfPresent(Int.self, forKey: .serverPort)) ?? d.serverPort
+        anisetteURL = (try? c.decodeIfPresent(String.self, forKey: .anisetteURL)) ?? d.anisetteURL
+        bundleSuffix = (try? c.decodeIfPresent(String.self, forKey: .bundleSuffix)) ?? d.bundleSuffix
+        keepAliveAudio = (try? c.decodeIfPresent(Bool.self, forKey: .keepAliveAudio)) ?? d.keepAliveAudio
+        udid = (try? c.decodeIfPresent(String.self, forKey: .udid)) ?? d.udid
+        appleIDTeam = (try? c.decodeIfPresent(String.self, forKey: .appleIDTeam)) ?? d.appleIDTeam
+        appearance = (try? c.decodeIfPresent(Int.self, forKey: .appearance)) ?? d.appearance
+        // Servers Apple now rejects are switched to a working one.
+        if Anisette.rejectedServers.contains(anisetteURL) || anisetteURL.trimmingCharacters(in: .whitespaces).isEmpty {
+            anisetteURL = Anisette.defaultServer
+        }
+    }
 }
 
 struct DownloadTask: Identifiable, Hashable {

@@ -169,7 +169,7 @@ struct ImportCertificateView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section(header: Text(L("Files"))) {
+                Section(header: Text(L("Files")), footer: Text(L("Tip: you can select the .p12 and the .mobileprovision together."))) {
                     Button { picking = 0 } label: {
                         HStack {
                             Label(L("Certificate (.p12)"), systemImage: "key.fill")
@@ -201,15 +201,16 @@ struct ImportCertificateView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("Cancel")) { dismiss() } } }
             .fileImporter(isPresented: Binding(get: { picking != nil }, set: { if !$0 { picking = nil } }),
-                          allowedContentTypes: picking == 0 ? [.p12, .pkcs12, .data] : [.mobileprovision, .data]) { r in
+                          allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
                 let which = picking
                 picking = nil
-                guard case .success(let u) = r else { return }
-                let scoped = u.startAccessingSecurityScopedResource()
-                let dst = Paths.work.appendingPathComponent(UUID().uuidString + "-" + u.lastPathComponent)
-                try? FileManager.default.copyItem(at: u, to: dst)
-                if scoped { u.stopAccessingSecurityScopedResource() }
-                if which == 0 { p12 = dst } else { profile = dst }
+                switch result {
+                case .failure(let e):
+                    error = e.localizedDescription
+                case .success(let urls):
+                    error = nil
+                    for u in urls { take(u, preferred: which) }
+                }
             }
             .onAppear {
                 if p12 == nil { p12 = prefillP12 }
@@ -219,6 +220,39 @@ struct ImportCertificateView: View {
                 if let p = p12 { autoProfile(near: p) }
             }
         }
+    }
+
+    /// Reads a picked file even if it still lives in iCloud or another app's file provider,
+    /// then files it as the certificate or the profile by looking at its contents.
+    func take(_ u: URL, preferred: Int?) {
+        let scoped = u.startAccessingSecurityScopedResource()
+        defer { if scoped { u.stopAccessingSecurityScopedResource() } }
+        var data: Data?
+        var readError: NSError?
+        NSFileCoordinator().coordinate(readingItemAt: u, options: [], error: &readError) { url in
+            data = try? Data(contentsOf: url)
+        }
+        guard let d = data, !d.isEmpty else {
+            error = L("Cannot read the selected files") + (readError.map { ": " + $0.localizedDescription } ?? "")
+            return
+        }
+        let ext = u.pathExtension.lowercased()
+        let looksLikeProfile = ext == "mobileprovision" || d.range(of: Data("<plist".utf8)) != nil
+        let looksLikeP12 = ext == "p12" || ext == "pfx" || (!looksLikeProfile && d.first == 0x30)
+        let isProfile = looksLikeProfile && !(ext == "p12" || ext == "pfx")
+        guard isProfile || looksLikeP12 else {
+            error = L("This is not a .p12 or .mobileprovision file") + ": " + u.lastPathComponent
+            return
+        }
+        let dst = Paths.work.appendingPathComponent(UUID().uuidString + "-" + u.lastPathComponent)
+        do {
+            try d.write(to: dst)
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
+        if isProfile { profile = dst } else { p12 = dst; autoProfile(near: u) }
+        _ = preferred
     }
 
     func autoProfile(near p: URL) {

@@ -12,6 +12,7 @@ struct SayoSignApp: App {
                 .environmentObject(state)
                 .environmentObject(certImport)
                 .tint(Theme.rose)
+                .preferredColorScheme(state.settings.appearance == 1 ? .light : state.settings.appearance == 2 ? .dark : nil)
                 .onOpenURL { state.handleOpen($0) }
         }
     }

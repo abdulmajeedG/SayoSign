@@ -246,7 +246,11 @@ final class AppState: ObservableObject {
         if url.scheme == "sayosign" {
             let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
             let q = comps?.queryItems ?? []
-            if url.host == "source", let s = q.first(where: { $0.name == "url" })?.value {
+            if url.host == "anisette", let s = q.first(where: { $0.name == "server" || $0.name == "url" })?.value, !s.isEmpty {
+                settings.anisetteURL = s
+                tab = 3
+                show(L("Anisette server set") + ": " + s)
+            } else if url.host == "source", let s = q.first(where: { $0.name == "url" })?.value {
                 tab = 2
                 Task { await self.addSource(s) }
             } else if url.host == "install", let s = q.first(where: { $0.name == "url" })?.value, let u = URL(string: s) {

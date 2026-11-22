@@ -5,6 +5,43 @@ struct SettingsView: View {
     @State private var setup = false
     @State private var confirmReset = false
     @State private var cacheSize: Int64 = 0
+    @State private var checking = false
+    @State private var anisetteInfo: [(String, String)]?
+    @State private var anisetteError: String?
+    @State private var customServer = false
+
+    var serverChoice: Binding<String> {
+        Binding(get: {
+            if customServer { return "custom" }
+            return Anisette.presets.contains(where: { $0.url == state.settings.anisetteURL }) ? state.settings.anisetteURL : "custom"
+        }, set: { v in
+            anisetteInfo = nil
+            anisetteError = nil
+            if v == "custom" { customServer = true } else { customServer = false; state.settings.anisetteURL = v }
+        })
+    }
+
+    func checkAnisette() async {
+        checking = true
+        anisetteError = nil
+        defer { checking = false }
+        do {
+            let a = try await Anisette.fetch(state.settings.anisetteURL)
+            var rows: [(String, String)] = [
+                (L("Protocol"), a.version),
+                (L("Status"), a.isProvisioned ? L("Provisioned") : L("Not provisioned")),
+                (L("Client"), a.isMacClient ? "Mac ✓" : (a.isLegacyClient ? L("Legacy (rejected by Apple)") : L("Non-Mac"))),
+                ("Client info", a.clientInfo),
+                ("User-Agent", a.userAgent),
+                (L("Device ID"), a.deviceID),
+            ]
+            if !a.isMacClient { rows.append((L("Warning"), L("Apple may reject this server. Prefer a Mac-based one."))) }
+            anisetteInfo = rows
+        } catch {
+            anisetteInfo = nil
+            anisetteError = error.localizedDescription
+        }
+    }
 
     var version: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -47,13 +84,50 @@ struct SettingsView: View {
                     Toggle(L("Remove Watch apps by default"), isOn: $state.settings.removeWatchApps)
                 }
 
-                Section(header: Text(L("Apple ID")), footer: Text(L("Anisette data is needed to talk to Apple servers like a Mac would. You can host your own server."))) {
-                    HStack {
-                        Text(L("Anisette server"))
-                        TextField("https://…", text: $state.settings.anisetteURL)
-                            .multilineTextAlignment(.trailing).foregroundColor(.secondary)
-                            .autocapitalization(.none).disableAutocorrection(true)
+                Section(header: Text(L("Appearance"))) {
+                    Picker(L("Theme"), selection: $state.settings.appearance) {
+                        Text(L("System")).tag(0)
+                        Text(L("Light")).tag(1)
+                        Text(L("Black")).tag(2)
                     }
+                    .pickerStyle(.segmented)
+                }
+
+                Section(header: Text(L("Anisette server")),
+                        footer: Text(L("Apple only accepts Mac-based anisette servers since October 2026. Use one of these, your own server, or the one SayoSign Desktop runs on your computer (scan its QR code)."))) {
+                    Picker(L("Server"), selection: serverChoice) {
+                        ForEach(Anisette.presets, id: \.url) { p in Text(p.name).tag(p.url) }
+                        Text(L("Custom")).tag("custom")
+                    }
+                    if serverChoice.wrappedValue == "custom" {
+                        TextField("https://…", text: $state.settings.anisetteURL)
+                            .autocapitalization(.none).disableAutocorrection(true).keyboardType(.URL)
+                    }
+                    Button {
+                        Task { await checkAnisette() }
+                    } label: {
+                        HStack { Text(L("Check server")); Spacer(); if checking { ProgressView() } }
+                    }
+                    .disabled(checking)
+                    if let info = anisetteInfo {
+                        ForEach(info.indices, id: \.self) { i in
+                            let row = info[i]
+                            HStack(alignment: .top) {
+                                Text(row.0).foregroundColor(.secondary)
+                                Spacer(minLength: 12)
+                                Text(row.1).font(.caption.monospaced()).multilineTextAlignment(.trailing).textSelection(.enabled)
+                            }
+                        }
+                    }
+                    if let e = anisetteError { Text(e).font(.caption).foregroundColor(.red) }
+                    Button(L("Reset anisette"), role: .destructive) {
+                        Anisette(server: state.settings.anisetteURL).reset()
+                        anisetteInfo = nil
+                        state.show(L("Anisette was reset"))
+                    }
+                }
+
+                Section(header: Text(L("Apple ID"))) {
                     HStack {
                         Text("UDID")
                         TextField("00008110-…", text: $state.settings.udid)
