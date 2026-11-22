@@ -931,3 +931,167 @@ struct AppleIDView: View {
         }
     }
 }
+
+/// Certificates and devices of the Apple ID account behind a SayoSign certificate:
+/// revoke development certificates, remove or add device UDIDs.
+struct AppleAccountView: View {
+    @EnvironmentObject var state: AppState
+    @Environment(\.dismiss) var dismiss
+    let cert: StoredCertificate
+    @State private var api: DeveloperAPI?
+    @State private var certs: [[String: Any]] = []
+    @State private var devices: [[String: Any]] = []
+    @State private var loading = false
+    @State private var error: String?
+    @State private var newName = ""
+    @State private var newUDID = ""
+    @State private var revokeSerial: String?
+    @State private var removeDevice: [String: Any]?
+
+    var team: String { cert.profile.teamID }
+
+    var body: some View {
+        NavigationView {
+            Form {
+                if let e = error { Section { Text(e).foregroundColor(.red) } }
+                Section(header: Text(L("Certificates")),
+                        footer: Text(L("Free accounts can have only two development certificates. A revoked certificate stops working for every app signed with it."))) {
+                    if certs.isEmpty && !loading { Text(L("No certificates")).foregroundColor(.secondary) }
+                    ForEach(certs.indices, id: \.self) { i in
+                        let c = certs[i]
+                        let serial = c["serialNumber"] as? String ?? ""
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(c["machineName"] as? String ?? c["name"] as? String ?? L("Certificate")).font(.subheadline.weight(.semibold))
+                                Text(serial).font(.caption2.monospaced()).foregroundColor(.secondary)
+                                if let d = c["expirationDate"] as? Date {
+                                    Text(LF("Expires %@", dateFormatter.string(from: d))).font(.caption2).foregroundColor(.secondary)
+                                }
+                                if isMine(serial) { Text(L("Used by this SayoSign certificate")).font(.caption2).foregroundColor(Theme.rose) }
+                            }
+                            Spacer()
+                            Button(L("Revoke"), role: .destructive) { revokeSerial = serial }
+                                .buttonStyle(SmallButtonStyle(filled: false))
+                                .disabled(loading || serial.isEmpty)
+                        }
+                    }
+                }
+                Section(header: Text(L("Devices")),
+                        footer: Text(L("Apps signed with this account install only on these devices."))) {
+                    if devices.isEmpty && !loading { Text(L("No devices")).foregroundColor(.secondary) }
+                    ForEach(devices.indices, id: \.self) { i in
+                        let d = devices[i]
+                        let udid = d["deviceNumber"] as? String ?? ""
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(d["name"] as? String ?? "iPhone").font(.subheadline.weight(.semibold))
+                                Text(udid).font(.caption2.monospaced()).foregroundColor(.secondary).textSelection(.enabled)
+                                if udid.uppercased() == state.settings.udid.uppercased() && !udid.isEmpty {
+                                    Text(L("This iPhone")).font(.caption2).foregroundColor(Theme.rose)
+                                }
+                            }
+                            Spacer()
+                            Button(L("Remove"), role: .destructive) { removeDevice = d }
+                                .buttonStyle(SmallButtonStyle(filled: false))
+                                .disabled(loading)
+                        }
+                    }
+                }
+                Section(header: Text(L("Add device"))) {
+                    TextField(L("Name"), text: $newName)
+                    TextField("00008110-000000000000001E", text: $newUDID)
+                        .autocapitalization(.allCharacters).disableAutocorrection(true)
+                    Button(L("Add")) { Task { await addDevice() } }
+                        .disabled(loading || newUDID.trimmingCharacters(in: .whitespaces).count < 20)
+                }
+            }
+            .navigationTitle(L("Apple ID account"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(L("Close")) { dismiss() } }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if loading { ProgressView() } else {
+                        Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }
+                    }
+                }
+            }
+            .confirmationDialog(L("Revoke this certificate?"), isPresented: Binding(get: { revokeSerial != nil }, set: { if !$0 { revokeSerial = nil } }),
+                                titleVisibility: .visible) {
+                Button(L("Revoke"), role: .destructive) {
+                    let s = revokeSerial
+                    revokeSerial = nil
+                    if let s = s { Task { await revoke(s) } }
+                }
+            } message: {
+                Text(isMine(revokeSerial ?? "") ? L("SayoSign signs with this certificate. After revoking, sign in to your Apple ID again.") : L("Apps signed with it will stop opening."))
+            }
+            .confirmationDialog(L("Remove this device?"), isPresented: Binding(get: { removeDevice != nil }, set: { if !$0 { removeDevice = nil } }),
+                                titleVisibility: .visible) {
+                Button(L("Remove"), role: .destructive) {
+                    let d = removeDevice
+                    removeDevice = nil
+                    if let d = d { Task { await remove(d) } }
+                }
+            }
+            .task { await reload() }
+        }
+    }
+
+    func isMine(_ serial: String) -> Bool {
+        let a = serial.uppercased().drop { $0 == "0" }, b = cert.details.serial.uppercased().replacingOccurrences(of: ":", with: "").drop { $0 == "0" }
+        return !a.isEmpty && a == b
+    }
+
+    func connect() async throws -> DeveloperAPI {
+        if let a = api { return a }
+        guard let s = AppleAccount.session(for: cert.id) else { throw SayoError(L("Sign in to your Apple ID again")) }
+        if s.expiry < Date() { throw SayoError(L("Your Apple ID session expired, sign in again")) }
+        let ani = try await Anisette.fetch(s.anisette ?? state.settings.anisetteURL)
+        let a = DeveloperAPI(session: s, anisette: ani)
+        api = a
+        return a
+    }
+
+    func run(_ work: (DeveloperAPI) async throws -> Void) async {
+        loading = true
+        error = nil
+        defer { loading = false }
+        do { try await work(try await connect()) } catch { self.error = error.localizedDescription }
+    }
+
+    func reload() async {
+        await run { a in
+            certs = try await a.call("listAllDevelopmentCerts", ["teamId": team])["certificates"] as? [[String: Any]] ?? []
+            devices = try await a.call("listDevices", ["teamId": team])["devices"] as? [[String: Any]] ?? []
+        }
+    }
+
+    func revoke(_ serial: String) async {
+        await run { a in
+            _ = try await a.call("revokeDevelopmentCert", ["teamId": team, "serialNumber": serial])
+            state.show(L("Certificate revoked"))
+        }
+        await reload()
+    }
+
+    func remove(_ d: [String: Any]) async {
+        guard let id = d["deviceId"] as? String else { error = L("Apple did not send this device's ID"); return }
+        await run { a in
+            _ = try await a.call("deleteDevice", ["teamId": team, "deviceId": id])
+            state.show(L("Device removed"))
+        }
+        await reload()
+    }
+
+    func addDevice() async {
+        let udid = newUDID.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        await run { a in
+            _ = try await a.call("addDevice", ["teamId": team, "deviceNumber": udid, "name": name.isEmpty ? "iPhone" : name])
+            state.show(L("Device added"))
+            newUDID = ""
+            newName = ""
+        }
+        await reload()
+    }
+}

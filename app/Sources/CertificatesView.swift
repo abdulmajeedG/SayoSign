@@ -75,6 +75,8 @@ struct CertificateCard: View {
     let cert: StoredCertificate
     @State private var expanded = false
     @State private var confirmDelete = false
+    @State private var manage = false
+    @State private var showDevices = false
 
     var selected: Bool { state.selectedCertificate?.id == cert.id }
 
@@ -115,12 +117,27 @@ struct CertificateCard: View {
                     InfoRow(L("App ID"), cert.profile.appID)
                     InfoRow(L("Profile expires"), dateFormatter.string(from: cert.profile.expiration))
                     InfoRow(L("Devices"), cert.profile.allDevices ? L("All (enterprise)") : "\(cert.profile.devices.count)")
+                    if !cert.profile.devices.isEmpty {
+                        Button { withAnimation { showDevices.toggle() } } label: {
+                            Text(showDevices ? L("Hide UDIDs") : L("Show UDIDs")).font(.caption.weight(.semibold))
+                        }
+                        if showDevices {
+                            ForEach(cert.profile.devices, id: \.self) { u in
+                                Text(u + (u.uppercased() == state.settings.udid.uppercased() ? "  ← " + L("This iPhone") : ""))
+                                    .font(.caption2.monospaced()).foregroundColor(.secondary).textSelection(.enabled)
+                            }
+                        }
+                    }
                     InfoRow(L("Debuggable"), cert.profile.getTaskAllow ? L("Yes") : L("No"))
                     if let d = cert.ocspChecked { InfoRow(L("Checked"), RelativeDateTimeFormatter().localizedString(for: d, relativeTo: Date())) }
                     VStack(alignment: .leading, spacing: 4) {
                         Text(L("Entitlements")).font(.caption.weight(.semibold)).foregroundColor(.secondary)
                         Text(cert.profile.entitlementKeys.map { $0.replacingOccurrences(of: "com.apple.developer.", with: "") }.joined(separator: " · "))
                             .font(.caption2).foregroundColor(.secondary)
+                    }
+                    if cert.fromAppleID {
+                        Button { manage = true } label: { Label(L("Manage Apple ID account"), systemImage: "person.badge.key") }
+                            .buttonStyle(SmallButtonStyle(filled: false))
                     }
                     HStack {
                         Button {
@@ -135,6 +152,7 @@ struct CertificateCard: View {
             }
         }
         .onTapGesture { withAnimation(.spring()) { expanded.toggle() } }
+        .sheet(isPresented: $manage) { AppleAccountView(cert: cert).environmentObject(state) }
         .confirmationDialog(L("Delete this certificate?"), isPresented: $confirmDelete, titleVisibility: .visible) {
             Button(L("Delete"), role: .destructive) { state.deleteCertificate(cert) }
         }
