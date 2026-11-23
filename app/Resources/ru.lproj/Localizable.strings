@@ -349,3 +349,5 @@
 "Could not advertise on the local network. Connect to Wi-Fi, allow Local Network for SayoSign (Settings → Privacy & Security → Local Network) and try again." = "Не удалось объявить SayoSign в локальной сети. Подключись к Wi-Fi, разреши SayoSign «Локальную сеть» (Настройки → Конфиденциальность и безопасность → Локальная сеть) и попробуй снова.";
 "SayoSign pairing code: %@" = "Код сопряжения SayoSign: %@";
 "Type it in Settings → Developer Mode." = "Введи его в Настройки → Режим разработчика.";
+"Code copied" = "Код скопирован";
+"Copy code" = "Скопировать код";

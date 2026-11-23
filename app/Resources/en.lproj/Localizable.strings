@@ -348,3 +348,5 @@
 "Could not advertise on the local network. Connect to Wi-Fi, allow Local Network for SayoSign (Settings → Privacy & Security → Local Network) and try again." = "Could not advertise on the local network. Connect to Wi-Fi, allow Local Network for SayoSign (Settings → Privacy & Security → Local Network) and try again.";
 "SayoSign pairing code: %@" = "SayoSign pairing code: %@";
 "Type it in Settings → Developer Mode." = "Type it in Settings → Developer Mode.";
+"Code copied" = "Code copied";
+"Copy code" = "Copy code";
