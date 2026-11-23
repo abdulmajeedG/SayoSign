@@ -143,7 +143,9 @@ final class PairingHost: NSObject, ObservableObject, NetServiceDelegate {
     }
 
     func netService(_ sender: NetService, didNotPublish errorDict: [String: NSNumber]) {
-        error = L("Could not advertise on the local network. Allow Local Network for SayoSign in Settings.")
+        let code = errorDict[NetService.errorCode]?.intValue ?? 0
+        error = L("Could not advertise on the local network. Connect to Wi-Fi, allow Local Network for SayoSign (Settings → Privacy & Security → Local Network) and try again.")
+            + " (\(code))"
         stop()
     }
 }

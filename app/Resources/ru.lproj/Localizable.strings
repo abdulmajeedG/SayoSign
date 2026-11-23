@@ -346,3 +346,4 @@
 "Cannot prepare the app to run inside SayoSign" = "Не удалось подготовить приложение к запуску внутри SayoSign";
 "%@ expires tomorrow" = "%@ истекает завтра";
 "Re-sign it in SayoSign with your Apple ID to keep it working." = "Переподпиши его в SayoSign через Apple ID, чтобы оно продолжало работать.";
+"Could not advertise on the local network. Connect to Wi-Fi, allow Local Network for SayoSign (Settings → Privacy & Security → Local Network) and try again." = "Не удалось объявить SayoSign в локальной сети. Подключись к Wi-Fi, разреши SayoSign «Локальную сеть» (Настройки → Конфиденциальность и безопасность → Локальная сеть) и попробуй снова.";
