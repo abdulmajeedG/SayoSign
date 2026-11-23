@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import UIKit
+import UserNotifications
 
 /// iOS 27 on-device pairing and installs through the pairing tunnel (rust/sayoidev, built on
 /// idevice). This is SideStore's install path: it works for free Apple ID profiles, which
@@ -81,6 +82,10 @@ final class PairingHost: NSObject, ObservableObject, NetServiceDelegate {
         pin = nil
         done = false
         state = L("Waiting for the iPhone…")
+        // The user goes to Settings while pairing: keep SayoSign running in the background
+        // and be allowed to show the PIN there as a notification.
+        InstallServer.shared.keepAlive(true)
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         let token = sayo_idev_cancel_new()
         cancel = token
         let ctx = Unmanaged.passRetained(self).toOpaque()
@@ -97,7 +102,11 @@ final class PairingHost: NSObject, ObservableObject, NetServiceDelegate {
                 guard let ctx = ctx, let pin = pin else { return }
                 let me = Unmanaged<PairingHost>.fromOpaque(ctx).takeUnretainedValue()
                 let p = String(cString: pin)
-                DispatchQueue.main.async { me.pin = p; me.state = L("Type this code on the iPhone") }
+                DispatchQueue.main.async {
+                    me.pin = p
+                    me.state = L("Type this code on the iPhone")
+                    PairingHost.notifyPIN(p)
+                }
             }
             let rc = sayo_idev_pair_host(DeviceLink.hostName, nil, out, ready, pinCb, ctx, token, &err, err.count)
             let message = String(cString: err)
@@ -106,6 +115,9 @@ final class PairingHost: NSObject, ObservableObject, NetServiceDelegate {
                 guard let self = self else { return }
                 self.service?.stop()
                 self.service = nil
+                InstallServer.shared.keepAlive(false)
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["pairing.pin"])
+                if rc == 0 { PairingHost.notify(L("This iPhone is paired"), id: "pairing.done") }
                 sayo_idev_cancel_free(token)
                 self.cancel = nil
                 self.running = false
@@ -122,6 +134,20 @@ final class PairingHost: NSObject, ObservableObject, NetServiceDelegate {
                 }
             }
         }
+    }
+
+    /// The code to type in Settings, shown as a notification while SayoSign is in the background.
+    static func notifyPIN(_ pin: String) {
+        notify(LF("SayoSign pairing code: %@", pin), body: L("Type it in Settings → Developer Mode."), id: "pairing.pin")
+    }
+
+    static func notify(_ title: String, body: String = "", id: String) {
+        let c = UNMutableNotificationContent()
+        c.title = title
+        c.body = body
+        c.sound = .default
+        if #available(iOS 15.0, *) { c.interruptionLevel = .timeSensitive }
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: c, trigger: nil))
     }
 
     func stop() {

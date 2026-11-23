@@ -346,3 +346,5 @@
 "%@ expires tomorrow" = "%@ 明天到期";
 "Re-sign it in SayoSign with your Apple ID to keep it working." = "请在 SayoSign 中用你的 Apple ID 重新签名，以保持可用。";
 "Could not advertise on the local network. Connect to Wi-Fi, allow Local Network for SayoSign (Settings → Privacy & Security → Local Network) and try again." = "无法在本地网络上广播。请连接 Wi-Fi，允许 SayoSign 使用本地网络（设置 → 隐私与安全性 → 本地网络），然后重试。";
+"SayoSign pairing code: %@" = "SayoSign 配对代码：%@";
+"Type it in Settings → Developer Mode." = "请在“设置 → 开发者模式”中输入。";
