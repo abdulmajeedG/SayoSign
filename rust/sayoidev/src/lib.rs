@@ -11,7 +11,7 @@
 //! The tunnel code mirrors idevice's own FFI (`ffi/src/tunnel_provider.rs`).
 
 use std::ffi::{CStr, CString, c_char, c_void};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -124,10 +124,20 @@ pub unsafe extern "C" fn sayo_idev_pair_host(
     let cancel = unsafe { cancel.as_ref() }.map(|c| c.0.clone());
 
     let res: Result<(), String> = RT.block_on(async move {
-        let listener = tokio::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))
-            .await
-            .map_err(|e| format!("bind: {e}"))?;
-        let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+        // Settings connects to the advertised addresses, usually over IPv6 (link-local), so
+        // listen on both IPv6 and IPv4 with the same port (like PhonePair's dual-stack listener).
+        let v6 = tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, 0)).await.ok();
+        let port0 = v6.as_ref().and_then(|l| l.local_addr().ok()).map(|a| a.port()).unwrap_or(0);
+        let v4 = tokio::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, port0)).await.ok();
+        if v6.is_none() && v4.is_none() {
+            return Err("bind: no IPv4 or IPv6 listener".to_string());
+        }
+        let port = v6
+            .as_ref()
+            .or(v4.as_ref())
+            .and_then(|l| l.local_addr().ok())
+            .map(|a| a.port())
+            .ok_or_else(|| "bind: no port".to_string())?;
         let mut pairing_file = RpPairingFile::generate(&name);
         let host_info = PairableHostInfo::generate(&name, &model);
         let service = pairing_file.identifier.clone();
@@ -141,10 +151,23 @@ pub unsafe extern "C" fn sayo_idev_pair_host(
             cb(port, c.as_ptr(), ctx.0);
         }
         let pair = async {
-            let (stream, _) = listener
-                .accept()
-                .await
-                .map_err(|e| format!("accept: {e}"))?;
+            let accept_v6 = async {
+                match &v6 {
+                    Some(l) => l.accept().await,
+                    None => std::future::pending().await,
+                }
+            };
+            let accept_v4 = async {
+                match &v4 {
+                    Some(l) => l.accept().await,
+                    None => std::future::pending().await,
+                }
+            };
+            let (stream, _) = tokio::select! {
+                r = accept_v6 => r,
+                r = accept_v4 => r,
+            }
+            .map_err(|e| format!("accept: {e}"))?;
             let mut host = PairableHost::new(RpPairingSocket::new_device(stream), host_info);
             host.accept(&mut pairing_file, |p: String| async move {
                 if let (Some(cb), Ok(c)) = (pin, CString::new(p)) {
