@@ -36,6 +36,12 @@ jobs:
           echo "Using $XC"
           sudo xcode-select -s "$XC"
           xcodebuild -version
+      - name: Build the idevice bridge (Rust)
+        run: |
+          rustup target add aarch64-apple-ios
+          cd rust/sayoidev
+          IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo build --release --target aarch64-apple-ios
+          ls -la target/aarch64-apple-ios/release/libsayoidev.a
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate project
@@ -46,7 +52,10 @@ jobs:
           xcodebuild -project SayoSign.xcodeproj -scheme SayoSign -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath DerivedData \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tee xcodebuild.log | grep -E "error:|warning: unre|BUILD" || true
-          test -d DerivedData/Build/Products/Release-iphoneos/SayoSign.app
+          # xcodebuild's status is swallowed above (to keep the log short); a failed build
+          # still leaves a partial .app behind, so require the finished bundle.
+          grep -q "BUILD SUCCEEDED" xcodebuild.log
+          test -f DerivedData/Build/Products/Release-iphoneos/SayoSign.app/Info.plist
       - name: Show errors
         if: failure()
         run: grep -E "error" -A3 xcodebuild.log | head -200

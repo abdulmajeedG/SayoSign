@@ -173,6 +173,18 @@ final class InstallServer {
     private var plain: NWListener?
     private let queue = DispatchQueue(label: "dev.murk.sayosign.server")
     private var served: Served?
+    /// What iOS asked for during the last install, for Settings → Install log.
+    private var events: [String] = []
+    private var bytesSent: Int64 = 0
+
+    func note(_ s: String) {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        let line = f.string(from: Date()) + "  " + s
+        queue.async { self.events.append(line); if self.events.count > 60 { self.events.removeFirst() } }
+    }
+    func clearLog() { queue.sync { events = []; bytesSent = 0 } }
+    func logLines() -> [String] { queue.sync { events } }
     private var port: UInt16 = 47616
     private var player: AVAudioPlayer?
     private var bgTask: UIBackgroundTaskIdentifier = .invalid
@@ -209,6 +221,22 @@ final class InstallServer {
         plain = l2
     }
 
+    /// Only the plain HTTP listener on 127.0.0.1: enough when the manifest comes from an
+    /// HTTPS manifest service, and needs no certificate or profile.
+    func startPlain(port: Int) throws {
+        let p = UInt16(clamping: port)
+        if plain != nil && p == self.port { return }
+        stop()
+        self.port = p
+        let pp = NWParameters.tcp
+        pp.requiredInterfaceType = .loopback
+        pp.allowLocalEndpointReuse = true
+        let l2 = try NWListener(using: pp, on: NWEndpoint.Port(rawValue: p + 1)!)
+        l2.newConnectionHandler = { [weak self] c in self?.accept(c) }
+        l2.start(queue: queue)
+        plain = l2
+    }
+
     func stop() {
         tls?.cancel()
         plain?.cancel()
@@ -230,10 +258,16 @@ final class InstallServer {
             if let d = data { buf.append(d) }
             if let r = buf.range(of: Data("\r\n\r\n".utf8)) {
                 let head = String(decoding: buf[..<r.lowerBound], as: UTF8.self)
-                self.handle(c, head: head)
-                return
+                let body = buf[r.upperBound...]
+                let length = head.components(separatedBy: "\r\n")
+                    .first { $0.lowercased().hasPrefix("content-length:") }
+                    .flatMap { Int($0.split(separator: ":", maxSplits: 1).last?.trimmingCharacters(in: .whitespaces) ?? "") } ?? 0
+                if body.count >= min(length, 1 << 20) || done || err != nil {
+                    self.handle(c, head: head, body: Data(body))
+                    return
+                }
             }
-            if done || err != nil || buf.count > 65536 { c.cancel(); return }
+            if done || err != nil || buf.count > (1 << 20) + 65536 { c.cancel(); return }
             self.receive(c, buffer: buf)
         }
     }
@@ -246,14 +280,40 @@ final class InstallServer {
         c.send(content: out, completion: .contentProcessed { _ in if close { c.cancel() } })
     }
 
-    private func handle(_ c: NWConnection, head: String) {
+    private func handle(_ c: NWConnection, head: String, body: Data = Data()) {
         let first = head.components(separatedBy: "\r\n").first ?? ""
         let parts = first.split(separator: " ")
         guard parts.count >= 2 else { c.cancel(); return }
         let method = String(parts[0])
         var path = String(parts[1])
         if let q = path.firstIndex(of: "?") { path = String(path[..<q]) }
+        note("iOS → \(method) \(path)")
         switch path {
+        case "/udid.mobileconfig":
+            respond(c, status: "200 OK", type: "application/x-apple-aspen-config", body: InstallServer.udidProfile(base: httpBase))
+        case "/udid/receive":
+            // iOS posts a signed plist with the device attributes (Profile Service).
+            let text = String(decoding: body, as: UTF8.self)
+            var udid: String?
+            if let block = text.range(of: "<key>UDID</key>\\s*<string>[0-9A-Fa-f-]{20,50}</string>", options: .regularExpression) {
+                let piece = String(text[block])
+                if let v = piece.range(of: "[0-9A-Fa-f-]{20,50}(?=</string>)", options: .regularExpression) { udid = String(piece[v]) }
+            }
+            if let u = udid {
+                note("UDID received")
+                let to = "\(httpBase)/udid/done?u=\(u)"
+                let h = "HTTP/1.1 301 Moved Permanently\r\nLocation: \(to)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                c.send(content: Data(h.utf8), completion: .contentProcessed { _ in c.cancel() })
+                DispatchQueue.main.async { AppState.shared.handleOpen(URL(string: "sayosign://udid?value=\(u)")!) }
+            } else {
+                note("UDID: no UDID in the profile reply")
+                respond(c, status: "400 Bad Request", type: "text/plain", body: Data("no UDID".utf8))
+            }
+        case "/udid/done":
+            let q = head.components(separatedBy: "\r\n").first ?? ""
+            let u = q.range(of: "[0-9A-Fa-f-]{20,50}", options: .regularExpression).map { String(q[$0]) } ?? ""
+            let html = "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><body style='font:17px -apple-system;text-align:center;padding:40px 20px;background:#111;color:#eee'><h2>UDID</h2><p style='word-break:break-all;font-family:monospace'>\(u)</p><p><a style='display:inline-block;padding:14px 28px;border-radius:14px;background:#e8506a;color:#fff;text-decoration:none' href='sayosign://udid?value=\(u)'>Open SayoSign</a></p><script>location.href='sayosign://udid?value=\(u)'</script>"
+            respond(c, status: "200 OK", type: "text/html; charset=utf-8", body: Data(html.utf8))
         case "/ping":
             respond(c, status: "200 OK", type: "text/plain", body: Data("ok".utf8))
         case "/ca.mobileconfig":
@@ -293,12 +353,15 @@ final class InstallServer {
             return
         }
         let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
+        bytesSent = 0
+        note("IPA: sending \(size) bytes")
         let header = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: \(size)\r\nConnection: close\r\n\r\n"
         c.send(content: Data(header.utf8), completion: .contentProcessed { _ in })
         if head { try? h.close(); c.cancel(); return }
         func pump() {
             let chunk = (try? h.read(upToCount: 1 << 18)) ?? Data()
             if chunk.isEmpty {
+                note("IPA: all \(bytesSent) bytes sent")
                 try? h.close()
                 c.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { [weak self] _ in
                     c.cancel()
@@ -307,7 +370,11 @@ final class InstallServer {
                 return
             }
             c.send(content: chunk, completion: .contentProcessed { err in
-                if err != nil { try? h.close(); c.cancel(); return }
+                if let err = err {
+                    self.note("IPA: stopped after \(self.bytesSent) bytes: \(err)")
+                    try? h.close(); c.cancel(); return
+                }
+                self.bytesSent += Int64(chunk.count)
                 pump()
             })
         }
@@ -343,6 +410,17 @@ final class InstallServer {
         }
     }
 
+    /// Profile Service request: iOS sends this iPhone's UDID to SayoSign's own server.
+    static func udidProfile(base: String) -> Data {
+        let content: [String: Any] = ["URL": "\(base)/udid/receive", "DeviceAttributes": ["UDID", "PRODUCT"]]
+        let p: [String: Any] = ["PayloadContent": content, "PayloadOrganization": "SayoSign",
+                                "PayloadDisplayName": "SayoSign UDID",
+                                "PayloadDescription": "Sends this iPhone's UDID to the SayoSign app on this iPhone. Nothing is installed.",
+                                "PayloadIdentifier": "dev.murk.sayosign.udid", "PayloadUUID": UUID().uuidString,
+                                "PayloadType": "Profile Service", "PayloadVersion": 1]
+        return (try? PropertyListSerialization.data(fromPropertyList: p, format: .xml, options: 0)) ?? Data()
+    }
+
     static func silentWAV() -> Data {
         let rate: UInt32 = 8000
         let samples: UInt32 = rate
@@ -372,12 +450,58 @@ enum Installer {
         (fallbackID, fallbackVersion)
     }
 
+    /// The manifest service base URL, or nil when installs go through the local HTTPS server.
     @MainActor
-    static func install(_ app: SignedApp, state: AppState) async throws {
+    static func manifestService(_ state: AppState) -> URL? {
+        var s = state.settings.manifestService.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.isEmpty { return nil }
+        if !s.contains("://") { s = "https://" + s }
+        guard let u = URL(string: s), u.scheme == "https" else { return nil }
+        return u
+    }
+
+    /// Whether this app goes through the pairing tunnel instead of an over-the-air install.
+    @MainActor
+    static func usesPairing(_ app: SignedApp, state: AppState) -> Bool {
+        switch state.settings.installMethod {
+        case 1: return false
+        case 2: return true
+        default: return app.viaAppleID == true && DeviceLink.isPaired
+        }
+    }
+
+    /// Installs the app. Returns true when it is already installed (pairing tunnel), false when
+    /// iOS now shows its own install prompt (over the air).
+    @MainActor
+    @discardableResult
+    static func install(_ app: SignedApp, state: AppState) async throws -> Bool {
+        // iOS refuses to replace the app that is serving the install ("Unable to install").
+        // This happens when SayoSign itself was signed with the same explicit-ID profile.
+        if let own = Bundle.main.bundleIdentifier, own.caseInsensitiveCompare(app.bundleID) == .orderedSame {
+            throw SayoError(LF("This app got SayoSign's own bundle ID (%@), so installing it would replace SayoSign and iOS refuses. Sign SayoSign with another certificate, or use an Apple ID or a wildcard certificate for this app.", own))
+        }
+        if usesPairing(app, state: state) {
+            state.busy = L("Connecting to this iPhone")
+            defer { state.busy = nil }
+            try await DeviceLink.install(ipa: state.ipaURL(app), address: state.settings.tunnelAddress, port: 49152) { pct, stage in
+                switch stage {
+                case "tunnel": state.busy = L("Connecting to this iPhone")
+                case "upload": state.busy = L("Uploading")
+                case "install": state.busy = LF("Installing %d%%", pct)
+                default: break
+                }
+            }
+            return true
+        }
         let server = InstallServer.shared
-        try server.start(port: state.settings.serverPort)
-        if !(await trusted(port: state.settings.serverPort)) {
-            throw InstallNeedsSetup()
+        let service = manifestService(state)
+        if service != nil {
+            try server.startPlain(port: state.settings.serverPort)
+        } else {
+            try server.start(port: state.settings.serverPort)
+            if !(await trusted(port: state.settings.serverPort)) {
+                throw InstallNeedsSetup()
+            }
         }
         let token = UUID().uuidString.prefix(8)
         var iconData: Data?
@@ -391,10 +515,25 @@ enum Installer {
             DispatchQueue.main.asyncAfter(deadline: .now() + 20) { server.keepAlive(false) }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 600) { server.keepAlive(false) }
-        let manifest = "\(server.httpsBase)/manifest.plist?t=\(token)"
+        var manifest = "\(server.httpsBase)/manifest.plist?t=\(token)"
+        if let base = service {
+            // The IPA comes straight from this iPhone over plain HTTP; the service only
+            // turns these parameters into the manifest iOS asks for.
+            let strict = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+            func q(_ v: String) -> String { v.addingPercentEncoding(withAllowedCharacters: strict) ?? "" }
+            let params = [("url", "\(server.httpBase)/app.ipa?t=\(token)"), ("id", app.bundleID),
+                          ("v", app.version), ("name", app.name)]
+            let query = params.map { "\($0.0)=\(q($0.1))" }.joined(separator: "&")
+            var b = base.absoluteString
+            while b.hasSuffix("/") { b.removeLast() }
+            manifest = b + "/?" + query
+        }
+        server.clearLog()
+        server.note(service != nil ? "Manifest from \(service!.host ?? "service"), IPA over \(server.httpBase)" : "Manifest from local HTTPS server")
         let enc = manifest.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&=?"))) ?? manifest
-        guard let u = URL(string: "itms-services://?action=download-manifest&url=\(enc)") else { return }
+        guard let u = URL(string: "itms-services://?action=download-manifest&url=\(enc)") else { return false }
         await UIApplication.shared.open(u)
+        return false
     }
 
     static func openTrollStore(_ ipa: URL) -> Bool {

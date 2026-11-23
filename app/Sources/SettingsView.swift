@@ -5,6 +5,8 @@ struct SettingsView: View {
     @State private var setup = false
     @State private var confirmReset = false
     @State private var cacheSize: Int64 = 0
+    @State private var installLog: [String] = []
+    @State private var pairing = false
     @State private var checking = false
     @State private var anisetteInfo: [(String, String)]?
     @State private var anisetteError: String?
@@ -65,8 +67,28 @@ struct SettingsView: View {
                     .padding(.vertical, 6)
                 }
 
-                Section(header: Text(L("Installing")), footer: Text(L("SayoSign installs apps through a tiny HTTPS server running on this iPhone. It uses a certificate authority created on this device only."))) {
-                    Button { setup = true } label: { Label(L("Local installer setup"), systemImage: "lock.shield") }
+                Section(header: Text(L("Install method")),
+                        footer: Text(L("Free Apple ID apps can only be installed through pairing (like SideStore): iOS 27, Developer Mode and LocalDevVPN. Certificates (.p12) install over the air."))) {
+                    Picker(L("Method"), selection: $state.settings.installMethod) {
+                        Text(L("Automatic")).tag(0)
+                        Text(L("Over the air")).tag(1)
+                        Text(L("Pairing (LocalDevVPN)")).tag(2)
+                    }
+                    Button { pairing = true } label: {
+                        HStack {
+                            Label(L("Pair this iPhone"), systemImage: "iphone.and.arrow.forward")
+                            Spacer()
+                            Text(DeviceLink.isPaired ? L("Paired") : L("Not paired")).foregroundColor(.secondary)
+                        }
+                    }
+                }
+
+                Section(header: Text(L("Installing")), footer: Text(L("With a manifest service, iOS just asks to install the app; nothing to set up. Leave it empty to use the local HTTPS installer and its one-time profile."))) {
+                    TextField(L("Manifest service (https://…workers.dev)"), text: $state.settings.manifestService)
+                        .keyboardType(.URL).autocapitalization(.none).disableAutocorrection(true)
+                    if state.settings.manifestService.trimmingCharacters(in: .whitespaces).isEmpty {
+                        Button { setup = true } label: { Label(L("Local installer setup"), systemImage: "lock.shield") }
+                    }
                     Toggle(L("Stay alive while installing"), isOn: $state.settings.keepAliveAudio)
                     Stepper(value: $state.settings.serverPort, in: 1025...65000, step: 2) {
                         HStack { Text(L("Server port")); Spacer(); Text("\(state.settings.serverPort)").foregroundColor(.secondary) }
@@ -146,6 +168,17 @@ struct SettingsView: View {
                     Button(L("Reset local installer"), role: .destructive) { confirmReset = true }
                 }
 
+                Section(header: Text(L("Install log")), footer: Text(L("What iOS requested during the last install. Send a screenshot if an install fails."))) {
+                    if installLog.isEmpty {
+                        Text(L("No install yet")).font(.caption).foregroundColor(.secondary)
+                    } else {
+                        ForEach(installLog.indices, id: \.self) { i in
+                            Text(installLog[i]).font(.caption.monospaced()).textSelection(.enabled)
+                        }
+                    }
+                    Button(L("Refresh")) { installLog = InstallServer.shared.logLines() }
+                }
+
                 Section(header: Text(L("About"))) {
                     Link(destination: URL(string: "https://github.com/murk-sus/SayoSign")!) {
                         Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
@@ -159,6 +192,7 @@ struct SettingsView: View {
             }
             .navigationTitle(L("Settings"))
             .sheet(isPresented: $setup) { InstallSetupView().environmentObject(state) }
+            .sheet(isPresented: $pairing) { PairingView().environmentObject(state) }
             .confirmationDialog(L("Reset local installer?"), isPresented: $confirmReset, titleVisibility: .visible) {
                 Button(L("Reset"), role: .destructive) {
                     InstallServer.shared.stop()
@@ -166,7 +200,10 @@ struct SettingsView: View {
                     state.show(L("Local installer reset. Remove the old profile in Settings."))
                 }
             }
-            .onAppear { cacheSize = AppState.folderSize(Paths.work) }
+            .onAppear {
+                cacheSize = AppState.folderSize(Paths.work)
+                installLog = InstallServer.shared.logLines()
+            }
         }
         .navigationViewStyle(.stack)
     }

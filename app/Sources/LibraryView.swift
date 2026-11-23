@@ -50,6 +50,9 @@ struct LibraryView: View {
                             LibraryRow(app: app)
                                 .contextMenu {
                                     Button { state.pendingSign = app } label: { Label(L("Sign"), systemImage: "signature") }
+                                    Button { Task { await state.addUnsigned(app) } } label: {
+                                        Label(L("Install without re-signing"), systemImage: "arrow.down.app")
+                                    }
                                     Button(role: .destructive) { state.deleteLibrary(app) } label: { Label(L("Delete"), systemImage: "trash") }
                                 }
                         }
@@ -208,16 +211,22 @@ struct SignedRow: View {
                         Pill(text: "v" + app.version)
                         Pill(text: app.certificateName, color: .secondary)
                         if !app.tweaks.isEmpty { Pill(text: LF("%d tweaks", app.tweaks.count), color: .purple) }
+                        if app.container == true { Pill(text: L("Inside SayoSign"), color: .teal) }
                     }
                 }
                 Spacer(minLength: 6)
                 VStack(spacing: 6) {
-                    Button {
-                        Task { await install() }
-                    } label: {
-                        if installing { ProgressView().tint(.white) } else { Text(L("Install")) }
+                    if app.container == true {
+                        Button { runInside() } label: { Text(L("Run")) }
+                            .buttonStyle(SmallButtonStyle())
+                    } else {
+                        Button {
+                            Task { await install() }
+                        } label: {
+                            if installing { ProgressView().tint(.white) } else { Text(L("Install")) }
+                        }
+                        .buttonStyle(SmallButtonStyle())
                     }
-                    .buttonStyle(SmallButtonStyle())
                     Button { share = state.ipaURL(app) } label: { Image(systemName: "square.and.arrow.up") }
                         .buttonStyle(SmallButtonStyle(filled: false))
                 }
@@ -225,12 +234,24 @@ struct SignedRow: View {
         }
     }
 
+    func runInside() {
+        do {
+            state.show(LF("%@ starts when you open SayoSign again", app.name))
+            try Container.run(app, ipa: state.ipaURL(app))
+        } catch {
+            state.show(error.localizedDescription)
+        }
+    }
+
     func install() async {
         installing = true
         defer { installing = false }
         do {
-            try await Installer.install(app, state: state)
-            state.show(L("Confirm the install prompt, keep SayoSign open until the icon finishes"))
+            if try await Installer.install(app, state: state) {
+                state.show(LF("%@ is installed", app.name))
+            } else {
+                state.show(L("Confirm the install prompt, keep SayoSign open until the icon finishes"))
+            }
         } catch is InstallNeedsSetup {
             setup = true
         } catch {

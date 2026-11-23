@@ -8,6 +8,8 @@ struct SignView: View {
 
     @State private var name = ""
     @State private var bundleID = ""
+    /// With an explicit-ID .p12 profile: keep each app's own bundle ID (like other signers do).
+    @State private var keepOwnID = true
     @State private var version = ""
     @State private var minIOS = ""
     @State private var iconURL: URL?
@@ -18,11 +20,11 @@ struct SignView: View {
     @State private var removeWatch = true
     @State private var removeSchemes = false
     @State private var fileSharing = false
+    @State private var inside = false
     @State private var certID: UUID?
     @State private var progress: Double = 0
     @State private var stage = ""
     @State private var signing = false
-    @State private var picking: PickKind?
     @State private var done: SignedApp?
     @State private var error: String?
     @State private var setup = false
@@ -37,17 +39,20 @@ struct SignView: View {
         return state.selectedCertificate
     }
 
-    var forcedBundle: String? {
-        guard let c = cert, !c.profile.isWildcard else { return nil }
+    /// The profile's single bundle ID for an explicit .p12 profile (Apple ID profiles are made per app).
+    var explicitBundle: String? {
+        guard let c = cert, !c.fromAppleID, !c.profile.isWildcard else { return nil }
         return c.profile.bundleID
     }
+
+    var forcedBundle: String? { keepOwnID ? nil : explicitBundle }
 
     var body: some View {
         NavigationView {
             Form {
                 Section {
                     HStack(spacing: 14) {
-                        Button { picking = .icon } label: {
+                        Button { pick(.icon) } label: {
                             ZStack(alignment: .bottomTrailing) {
                                 AppIconView(image: iconImage ?? state.icon(for: app), size: 66)
                                 Image(systemName: "pencil.circle.fill").font(.title3).foregroundColor(Theme.rose).background(Circle().fill(Color.white))
@@ -84,7 +89,17 @@ struct SignView: View {
                     }
                 }
 
-                Section(header: Text(L("App")), footer: forcedBundle.map { Text(LF("This profile only allows %@, the bundle ID will be replaced and app extensions removed.", $0)) }) {
+                Section(header: Text(L("App")), footer: explicitBundle.map { fb in
+                    Text(keepOwnID
+                         ? LF("This profile is made for %@. The app keeps its own bundle ID, so several apps can be installed side by side; app extensions are removed.", fb)
+                         : LF("This profile only allows %@, the bundle ID will be replaced and app extensions removed.", fb)
+                           + (fb.caseInsensitiveCompare(Bundle.main.bundleIdentifier ?? "") == .orderedSame
+                              ? "\n\n⚠️ " + L("SayoSign itself has this bundle ID. An app signed with this certificate cannot be installed while SayoSign uses the same ID.")
+                              : ""))
+                }) {
+                    if explicitBundle != nil {
+                        Toggle(L("Keep the app's own bundle ID"), isOn: $keepOwnID)
+                    }
                     LabeledField(title: L("Name"), text: $name, placeholder: app.name)
                     LabeledField(title: L("Bundle ID"), text: $bundleID, placeholder: forcedBundle ?? app.bundleID)
                         .disabled(forcedBundle != nil)
@@ -108,7 +123,7 @@ struct SignView: View {
                             }
                         } label: { Label(L("Add saved tweak"), systemImage: "tray.full") }
                     }
-                    Button { picking = .tweak } label: { Label(L("Add tweak from Files"), systemImage: "plus") }
+                    Button { pick(.tweak) } label: { Label(L("Add tweak from Files"), systemImage: "plus") }
                 }
 
                 Section(header: Text(L("Options"))) {
@@ -116,7 +131,14 @@ struct SignView: View {
                     Toggle(L("Remove Apple Watch app"), isOn: $removeWatch)
                     Toggle(L("Remove URL schemes"), isOn: $removeSchemes)
                     Toggle(L("Enable file sharing"), isOn: $fileSharing)
-                    Button { picking = .entitlements } label: {
+                    Toggle(isOn: $inside) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L("Run inside SayoSign (experimental)"))
+                            Text(L("Like LiveContainer: not installed in iOS, no app limit. Use the same certificate SayoSign itself is signed with."))
+                                .font(.caption2).foregroundColor(.secondary)
+                        }
+                    }
+                    Button { pick(.entitlements) } label: {
                         HStack {
                             Text(L("Extra entitlements"))
                             Spacer()
@@ -137,7 +159,15 @@ struct SignView: View {
                 if let e = error {
                     Section { Text(e).foregroundColor(.red).font(.callout) }
                 }
-                if let s = done {
+                if let s = done, s.container == true {
+                    Section(footer: Text(L("SayoSign closes; open it again and the app starts inside it. Close that app and open SayoSign again to come back."))) {
+                        Button {
+                            do { try Container.run(s, ipa: state.ipaURL(s)) } catch { self.error = error.localizedDescription }
+                        } label: { Label(L("Run inside SayoSign"), systemImage: "play.fill") }
+                            .buttonStyle(PrimaryButtonStyle())
+                            .listRowBackground(Color.clear)
+                    }
+                } else if let s = done {
                     Section {
                         Button {
                             Task {
@@ -173,13 +203,6 @@ struct SignView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("Close")) { dismiss() } }
             }
-            .fileImporter(isPresented: Binding(get: { picking != nil }, set: { if !$0 { picking = nil } }),
-                          allowedContentTypes: pickTypes, allowsMultipleSelection: picking == .tweak) { r in
-                let kind = picking
-                picking = nil
-                guard case .success(let urls) = r else { return }
-                for u in urls { take(u, kind: kind) }
-            }
             .sheet(isPresented: $setup) { InstallSetupView().environmentObject(state) }
             .onAppear {
                 removePlugins = state.settings.autoRemovePlugins
@@ -189,12 +212,16 @@ struct SignView: View {
         .interactiveDismissDisabled(signing)
     }
 
-    var pickTypes: [UTType] {
-        switch picking {
-        case .icon: return [.png, .jpeg, .image]
-        case .tweak: return [.deb, .dylib, .folder, .data]
-        case .entitlements: return [.xml, .propertyList, .data]
-        case .none: return [.data]
+    /// The kind travels with the request, so the result is filed correctly.
+    func pick(_ kind: PickKind) {
+        let types: [UTType]
+        switch kind {
+        case .icon: types = [.png, .jpeg, .image]
+        case .tweak: types = [.deb, .dylib, .folder, .data]
+        case .entitlements: types = [.xml, .propertyList, .data]
+        }
+        FilePicker.shared.pick(types, multiple: kind == .tweak) { urls in
+            for u in urls { take(u, kind: kind) }
         }
     }
 
@@ -255,6 +282,8 @@ struct SignView: View {
         defer { signing = false }
         var opts = SayoCore.SignOptions()
         opts.bundleID = bundleID.trimmingCharacters(in: .whitespaces)
+        // An explicit .p12 profile would otherwise rename every app to the profile's ID.
+        if opts.bundleID.isEmpty && keepOwnID && explicitBundle != nil { opts.bundleID = app.bundleID }
         opts.displayName = name.trimmingCharacters(in: .whitespaces)
         opts.shortVersion = version.trimmingCharacters(in: .whitespaces)
         opts.minIOS = minIOS.trimmingCharacters(in: .whitespaces)
@@ -264,6 +293,7 @@ struct SignView: View {
         opts.removeWatch = removeWatch
         opts.removeURLSchemes = removeSchemes
         opts.fileSharing = fileSharing
+        opts.container = inside
         do {
             let result = try await state.performSign(app: app, cert: c, options: opts, tweaks: tweaks) { f, s in
                 self.progress = f

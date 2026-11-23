@@ -1,3 +1,4 @@
+import UserNotifications
 import Foundation
 import Security
 import SwiftUI
@@ -81,6 +82,52 @@ final class AppState: ObservableObject {
 
     func appURL(_ app: LibraryApp) -> URL {
         Paths.library.appendingPathComponent(app.id.uuidString).appendingPathComponent("Payload").appendingPathComponent(app.appFolder)
+    }
+
+    /// Puts an imported IPA among the signed apps exactly as it is, so an IPA signed
+    /// elsewhere can go through SayoSign's installer without being re-signed.
+    func addUnsigned(_ app: LibraryApp) async {
+        let root = Paths.library.appendingPathComponent(app.id.uuidString)
+        let appDir = appURL(app)
+        let level = Int32(settings.compressionLevel)
+        busy = L("Preparing")
+        defer { busy = nil }
+        do {
+            let result: SignedApp = try await Task.detached(priority: .userInitiated) {
+                let info = NSDictionary(contentsOf: appDir.appendingPathComponent("Info.plist")) as? [String: Any] ?? [:]
+                let bid = info["CFBundleIdentifier"] as? String ?? app.bundleID
+                let ver = info["CFBundleShortVersionString"] as? String ?? app.version
+                let name = (info["CFBundleDisplayName"] as? String) ?? app.name
+                let safe = name.replacingOccurrences(of: "/", with: "-")
+                let fileName = "\(safe)_\(ver)_asis_\(UUID().uuidString.prefix(6)).ipa"
+                let out = Paths.signed.appendingPathComponent(fileName)
+                try SayoCore.zip(root, to: out, level: level)
+                let size = (try? FileManager.default.attributesOfItem(atPath: out.path)[.size] as? NSNumber)?.int64Value ?? 0
+                return SignedApp(id: UUID(), libraryID: app.id, name: name, bundleID: bid, version: ver,
+                                 certificateName: L("Original signature"), signedAt: Date(), ipaFile: fileName, size: size, tweaks: [])
+            }.value
+            signed.insert(result, at: 0)
+            save()
+            show(L("Ready to install, see Signed apps"))
+        } catch {
+            show(error.localizedDescription)
+        }
+    }
+
+    /// Free Apple ID signatures last 7 days: remind a day before, so the app can be re-signed in time.
+    static func remindBeforeExpiry(_ app: SignedApp) {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { ok, _ in
+            guard ok else { return }
+            let content = UNMutableNotificationContent()
+            content.title = LF("%@ expires tomorrow", app.name)
+            content.body = L("Re-sign it in SayoSign with your Apple ID to keep it working.")
+            content.sound = .default
+            let fire = app.signedAt.addingTimeInterval(6 * 24 * 3600).timeIntervalSinceNow
+            guard fire > 60 else { return }
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: fire, repeats: false)
+            center.add(UNNotificationRequest(identifier: "expiry." + app.id.uuidString, content: content, trigger: trigger))
+        }
     }
 
     func ipaURL(_ app: SignedApp) -> URL {
@@ -213,7 +260,9 @@ final class AppState: ObservableObject {
     }
 
     func deleteSigned(_ app: SignedApp) {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["expiry." + app.id.uuidString])
         try? Paths.fm.removeItem(at: ipaURL(app))
+        Container.remove(app)
         signed.removeAll { $0.id == app.id }
         save()
     }
@@ -246,7 +295,12 @@ final class AppState: ObservableObject {
         if url.scheme == "sayosign" {
             let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
             let q = comps?.queryItems ?? []
-            if url.host == "anisette", let s = q.first(where: { $0.name == "server" || $0.name == "url" })?.value, !s.isEmpty {
+            if url.host == "udid", let v = q.first(where: { $0.name == "value" })?.value,
+               v.range(of: "^[0-9A-Fa-f-]{20,50}$", options: .regularExpression) != nil {
+                settings.udid = v.uppercased()
+                NotificationCenter.default.post(name: .sayoUDID, object: settings.udid)
+                show(L("UDID detected") + ": " + settings.udid)
+            } else if url.host == "anisette", let s = q.first(where: { $0.name == "server" || $0.name == "url" })?.value, !s.isEmpty {
                 settings.anisetteURL = s
                 tab = 3
                 show(L("Anisette server set") + ": " + s)
@@ -309,7 +363,12 @@ final class AppState: ObservableObject {
         Keychain.delete("appleid.session." + c.id.uuidString)
         Keychain.delete("appleid.password." + c.id.uuidString)
         if c.fromAppleID {
-            SecItemDelete([kSecClass as String: kSecClassKey, kSecAttrApplicationTag as String: AppleAccount.keyTag(c.id)] as CFDictionary)
+            if Keychain.get("appleid.keytag." + c.id.uuidString) != nil {
+                // The Apple ID's shared key stays for the next sign-in (iLoader-style reuse).
+                Keychain.delete("appleid.keytag." + c.id.uuidString)
+            } else {
+                SecItemDelete([kSecClass as String: kSecClassKey, kSecAttrApplicationTag as String: AppleAccount.keyTag(c.id)] as CFDictionary)
+            }
         }
         certificates.removeAll { $0.id == c.id }
         if settings.selectedCertificate == c.id { settings.selectedCertificate = certificates.first?.id }
@@ -393,6 +452,8 @@ final class AppState: ObservableObject {
         let compression = Int32(settings.compressionLevel)
         let appName = opts.displayName.isEmpty ? app.name : opts.displayName
         let certName = c.nickname
+        let viaAppleID = c.fromAppleID
+        let container = options.container
         let libID = app.id
         let ident = try self.identity(for: c)
         var profile: Data
@@ -402,6 +463,12 @@ final class AppState: ObservableObject {
             let (p, finalID) = try await AppleAccount.profile(for: c, bundleID: wanted, name: appName, anisetteURL: settings.anisetteURL)
             profile = p
             opts.bundleID = finalID
+            // A profile without this iPhone installs as "Unable to install, try later".
+            let udid = settings.udid.trimmingCharacters(in: .whitespaces).uppercased()
+            if let pd = SayoCore.profileDetails(p), !pd.allDevices, !udid.isEmpty,
+               !pd.devices.contains(where: { $0.uppercased() == udid }) {
+                throw SayoError(LF("Apple's profile does not include the UDID %@. Check the UDID in Certificates → Manage Apple ID account and sign in again with the right one.", udid))
+            }
         } else {
             guard let files = certificateFiles(c) else { throw SayoError(L("Certificate files are missing")) }
             profile = files.profile
@@ -428,6 +495,14 @@ final class AppState: ObservableObject {
                    fm.fileExists(atPath: fw.path) {
                     o.hookFramework = fw
                 }
+                if o.container {
+                    // LiveContainer-style: the main executable becomes a dylib SayoSign can load.
+                    let info = NSDictionary(contentsOf: appCopy.appendingPathComponent("Info.plist")) as? [String: Any] ?? [:]
+                    guard let exe = info["CFBundleExecutable"] as? String,
+                          sayo_macho_make_dylib(appCopy.appendingPathComponent(exe).path) == 0 else {
+                        throw SayoError.last("Cannot prepare the app to run inside SayoSign")
+                    }
+                }
                 try SayoCore.signApp(app: appCopy, profile: profileData, identity: ident, options: o) { f, s in
                     Task { @MainActor in progress(f * 0.92, s) }
                 }
@@ -445,10 +520,12 @@ final class AppState: ObservableObject {
                 let size = (try? fm.attributesOfItem(atPath: out.path)[.size] as? NSNumber)?.int64Value ?? 0
                 return SignedApp(id: UUID(), libraryID: libID, name: finalName, bundleID: finalID, version: finalVersion,
                                  certificateName: certName, signedAt: Date(), ipaFile: fileName, size: size,
-                                 tweaks: tweaks.map { $0.lastPathComponent })
+                                 tweaks: tweaks.map { $0.lastPathComponent }, viaAppleID: viaAppleID,
+                                 container: container ? true : nil)
             }.value
             signed.insert(result, at: 0)
             save()
+            if result.viaAppleID == true { AppState.remindBeforeExpiry(result) }
             return result
         } catch {
             try? FileManager.default.removeItem(at: workRoot)

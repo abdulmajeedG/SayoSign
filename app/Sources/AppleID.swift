@@ -343,6 +343,44 @@ final class Anisette {
     }
 }
 
+/// Apple answers with a plist (sometimes a bare <dict>), JSON, an HTML page, nothing at all,
+/// or a gzip body without Content-Encoding, depending on the endpoint. Same rules as the desktop.
+enum AppleHTTP {
+    static func send(_ r: URLRequest) async throws -> (Int, Data) {
+        let (data, resp) = try await URLSession.shared.data(for: r)
+        return ((resp as? HTTPURLResponse)?.statusCode ?? 0, gunzipIfNeeded(data))
+    }
+
+    static func parse(_ data: Data, status: Int, where place: String) throws -> [String: Any] {
+        let body = gunzipIfNeeded(data)
+        if body.allSatisfy({ $0 == 0x20 || $0 == 0x0a || $0 == 0x0d || $0 == 0x09 }) { return [:] }
+        if let p = try? PropertyListSerialization.propertyList(from: GSAuth.plistBody(body), format: nil) {
+            return (p as? [String: Any]) ?? ["value": p]
+        }
+        if let j = try? JSONSerialization.jsonObject(with: body) {
+            return (j as? [String: Any]) ?? ["value": j]
+        }
+        let snippet = String(decoding: body.prefix(160), as: UTF8.self)
+            .replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+        throw SayoError(L("Unexpected response from Apple") + " (\(place), HTTP \(status)): " + snippet)
+    }
+
+    static func gunzipIfNeeded(_ d: Data) -> Data {
+        let b = [UInt8](d.prefix(10))
+        guard b.count == 10, b[0] == 0x1f, b[1] == 0x8b, b[2] == 8 else { return d }
+        let flags = b[3]
+        var i = 10
+        let all = [UInt8](d)
+        if flags & 4 != 0, all.count > i + 1 { i += 2 + (Int(all[i]) | (Int(all[i + 1]) << 8)) }
+        if flags & 8 != 0 { while i < all.count && all[i] != 0 { i += 1 }; i += 1 }
+        if flags & 16 != 0 { while i < all.count && all[i] != 0 { i += 1 }; i += 1 }
+        if flags & 2 != 0 { i += 2 }
+        guard i < all.count - 8 else { return d }
+        let deflated = Data(all[i..<(all.count - 8)])
+        return (try? (deflated as NSData).decompressed(using: .zlib) as Data) ?? d
+    }
+}
+
 /// Friendly text for common GrandSlam error codes.
 func grandSlamError(_ status: [String: Any]) -> SayoError? {
     let ec = (status["ec"] as? Int) ?? 0
@@ -368,6 +406,9 @@ struct AppleSession: Codable {
     var xcodeToken: String
     var expiry: Date
     var email: String
+    /// The anisette server used at sign-in. Developer requests must keep using it,
+    /// like the desktop does; older sessions have none and fall back to the setting.
+    var anisette: String? = nil
 }
 
 enum SecondFactor {
@@ -382,8 +423,17 @@ final class GSAuth {
 
     init(anisette: Anisette, email: String, password: String) {
         self.anisette = anisette
-        self.email = email
+        // Apple's SRP hashes the account name in lower case: "Name@gmail.com" gets -22406
+        // (wrong password) even with the right password.
+        self.email = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         self.password = password
+    }
+
+    /// Apple's session data is a bare <dict>...</dict> without the XML/plist wrapper.
+    static func plistBody(_ d: Data) -> Data {
+        let t = String(decoding: d.prefix(64), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.hasPrefix("<dict") || t.hasPrefix("<array") else { return d }
+        return Data("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">".utf8) + d + Data("</plist>".utf8)
     }
 
     private func post(_ body: [String: Any]) async throws -> [String: Any] {
@@ -396,12 +446,12 @@ final class GSAuth {
         r.httpBody = try PropertyListSerialization.data(fromPropertyList: wrapped, format: .xml, options: 0)
         anisette.applyBase(&r)
         r.setValue("close", forHTTPHeaderField: "Connection")
-        let (data, resp) = try await URLSession.shared.data(for: r)
-        if let h = resp as? HTTPURLResponse, [500, 503].contains(h.statusCode) {
-            throw SayoError(L("Apple rejected the anisette data. Choose a Mac-based anisette server and reset anisette.") + " (HTTP \(h.statusCode))")
+        let (status, data) = try await AppleHTTP.send(r)
+        if [500, 503].contains(status) {
+            throw SayoError(L("Apple rejected the anisette data. Choose a Mac-based anisette server and reset anisette.") + " (HTTP \(status))")
         }
-        guard let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-              let resp = plist["Response"] as? [String: Any] else { throw SayoError(L("Unexpected response from Apple")) }
+        let plist = try AppleHTTP.parse(data, status: status, where: "sign-in")
+        let resp = (plist["Response"] as? [String: Any]) ?? plist
         if let st = resp["Status"] as? [String: Any], let err = grandSlamError(st) { throw err }
         return resp
     }
@@ -449,7 +499,7 @@ final class GSAuth {
         let key = Crypto.hmac(K, Data("extra data key:".utf8))
         let iv = Crypto.hmac(K, Data("extra data iv:".utf8)).prefix(16)
         let dec = try Crypto.cbcDecrypt(key: key, iv: Data(iv), spd)
-        guard let sd = try PropertyListSerialization.propertyList(from: dec, format: nil) as? [String: Any],
+        guard let sd = try PropertyListSerialization.propertyList(from: Self.plistBody(dec), format: nil) as? [String: Any],
               let adsid = sd["adsid"] as? String, let idms = sd["GsIdmsToken"] as? String,
               let sk = sd["sk"] as? Data, let cc = sd["c"] as? Data else {
             throw SayoError(L("Cannot read Apple session"))
@@ -476,12 +526,15 @@ final class GSAuth {
     func requestCode(_ r: LoginResult, kind: SecondFactor) async throws {
         switch kind {
         case .trustedDevice:
-            _ = try await URLSession.shared.data(for: authRequest(try anisette.url("trustedDeviceSecondaryAuth"), method: "GET", r: r))
+            // Apple answers with an HTML page here; only the status matters.
+            let (status, _) = try await AppleHTTP.send(authRequest(try anisette.url("trustedDeviceSecondaryAuth"), method: "GET", r: r))
+            if status >= 400 { throw SayoError(L("Apple could not send the code to your devices") + " (HTTP \(status))") }
         case .sms:
-            _ = try await URLSession.shared.data(for: authRequest(URL(string: "https://gsa.apple.com/auth")!, method: "GET", r: r, json: true))
+            _ = try await AppleHTTP.send(authRequest(URL(string: "https://gsa.apple.com/auth")!, method: "GET", r: r, json: true))
             var req = try await authRequest(URL(string: "https://gsa.apple.com/auth/verify/phone")!, method: "PUT", r: r, json: true)
             req.httpBody = try JSONSerialization.data(withJSONObject: ["phoneNumber": ["id": 1], "mode": "sms"])
-            _ = try await URLSession.shared.data(for: req)
+            let (status, _) = try await AppleHTTP.send(req)
+            if status >= 400 { throw SayoError(L("Apple could not send the SMS code") + " (HTTP \(status))") }
         }
     }
 
@@ -490,16 +543,17 @@ final class GSAuth {
         case .trustedDevice:
             var req = try await authRequest(try anisette.url("validateCode"), method: "GET", r: r)
             req.setValue(code, forHTTPHeaderField: "security-code")
-            let (data, _) = try await URLSession.shared.data(for: req)
-            if let p = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+            let (status, data) = try await AppleHTTP.send(req)
+            if let p = try? AppleHTTP.parse(data, status: status, where: "two-factor"),
                let err = grandSlamError((p["Status"] as? [String: Any]) ?? p) {
                 throw err
             }
+            if status >= 400 { throw SayoError(L("Wrong code") + " (HTTP \(status))") }
         case .sms:
             var req = try await authRequest(URL(string: "https://gsa.apple.com/auth/verify/phone/securitycode")!, method: "POST", r: r, json: true)
             req.httpBody = try JSONSerialization.data(withJSONObject: ["phoneNumber": ["id": 1], "securityCode": ["code": code], "mode": "sms"])
-            let (_, resp) = try await URLSession.shared.data(for: req)
-            if let h = resp as? HTTPURLResponse, !(200..<300).contains(h.statusCode) { throw SayoError(L("Wrong code")) }
+            let (status, _) = try await AppleHTTP.send(req)
+            if status >= 400 { throw SayoError(L("Wrong code") + " (HTTP \(status))") }
         }
     }
 
@@ -510,13 +564,14 @@ final class GSAuth {
                                    "o": "apptokens", "t": r.idmsToken, "u": r.adsid])
         guard let et = resp["et"] as? Data else { throw SayoError(L("Apple did not return an app token")) }
         let dec = try Crypto.gcmDecrypt(key: r.sk, et)
-        guard let p = try PropertyListSerialization.propertyList(from: dec, format: nil) as? [String: Any],
+        guard let p = try PropertyListSerialization.propertyList(from: Self.plistBody(dec), format: nil) as? [String: Any],
               let t = p["t"] as? [String: Any], let x = t[app] as? [String: Any], let token = x["token"] as? String else {
             throw SayoError(L("Cannot read the Xcode token"))
         }
         var exp = Date().addingTimeInterval(3600 * 24 * 7)
         if let e = x["expiry"] as? Int { exp = Date(timeIntervalSince1970: TimeInterval(e) / 1000) }
-        return AppleSession(adsid: r.adsid, idmsToken: r.idmsToken, xcodeToken: token, expiry: exp, email: email)
+        return AppleSession(adsid: r.adsid, idmsToken: r.idmsToken, xcodeToken: token, expiry: exp, email: email,
+                            anisette: anisette.server)
     }
 }
 
@@ -545,14 +600,16 @@ final class DeveloperAPI {
         r.setValue("en-us", forHTTPHeaderField: "Accept-Language")
         r.setValue(session.adsid, forHTTPHeaderField: "X-Apple-I-Identity-Id")
         r.setValue(session.xcodeToken, forHTTPHeaderField: "X-Apple-GS-Token")
-        let (data, _) = try await URLSession.shared.data(for: r)
-        guard let p = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
-            throw SayoError(L("Unexpected developer services response"))
+        let (status, data) = try await AppleHTTP.send(r)
+        let parsed = try? AppleHTTP.parse(data, status: status, where: "developer services (\(action))")
+        if (status == 401 || status == 403) && parsed?["resultCode"] == nil {
+            throw SayoError(L("Apple developer services refused the session. Sign in again.") + " (HTTP \(status))")
         }
+        let p = try parsed ?? AppleHTTP.parse(data, status: status, where: "developer services (\(action))")
         let code = (p["resultCode"] as? Int) ?? 0
         if code != 0 {
             let msg = (p["userString"] as? String) ?? (p["resultString"] as? String) ?? "error \(code)"
-            throw SayoError(msg)
+            throw DevServicesError(code: code, message: msg)
         }
         return p
     }
@@ -567,9 +624,23 @@ final class DeveloperAPI {
         _ = try await call("addDevice", ["teamId": team, "deviceNumber": udid, "name": UIDevice.current.name])
     }
 
-    func createCertificate(team: String, keyTag: Data) async throws -> Data {
-        let key = try LocalCA.makeKey(tag: keyTag)
+    enum CertificateOutcome {
+        case ready(Data)
+        /// Apple's certificate limit is reached; the user picks what to revoke (as iLoader does).
+        case limitReached([[String: Any]])
+    }
+
+    static let machineName = "SayoSign"
+
+    /// iLoader's approach: one key per Apple ID, reused. If the account still has a SayoSign
+    /// certificate for that key, use it as is; otherwise request a new one. Nothing is revoked
+    /// here: when Apple says the limit is reached, the caller asks the user what to revoke.
+    func obtainCertificate(team: String, key: SecKey) async throws -> CertificateOutcome {
         guard let pub = LocalCA.publicDER(key) else { throw SayoError(L("Cannot create key")) }
+        let existing = try await call("listAllDevelopmentCerts", ["teamId": team])["certificates"] as? [[String: Any]] ?? []
+        for c in existing where (c["machineName"] as? String) == DeveloperAPI.machineName {
+            if let content = c["certContent"] as? Data, DeveloperAPI.publicKey(ofCertificate: content) == pub { return .ready(content) }
+        }
         var tbs = sayo_buf()
         let rc = pub.withUnsafeBytes { sayo_csr_info($0.bindMemory(to: UInt8.self).baseAddress, pub.count, "SayoSign", &tbs) }
         guard rc == 0, let tp = tbs.data else { sayo_buf_free(&tbs); throw SayoError(L("Cannot create CSR")) }
@@ -578,8 +649,8 @@ final class DeveloperAPI {
         guard let sig = LocalCA.sign(key, tbsData) else { throw SayoError(L("Cannot sign CSR")) }
         var csr = sayo_buf()
         _ = tbsData.withUnsafeBytes { t in
-            sig.withUnsafeBytes { s in
-                sayo_csr_finish(t.bindMemory(to: UInt8.self).baseAddress, tbsData.count, s.bindMemory(to: UInt8.self).baseAddress, sig.count, &csr)
+            sig.withUnsafeBytes { sg in
+                sayo_csr_finish(t.bindMemory(to: UInt8.self).baseAddress, tbsData.count, sg.bindMemory(to: UInt8.self).baseAddress, sig.count, &csr)
             }
         }
         guard let cp = csr.data else { throw SayoError(L("Cannot create CSR")) }
@@ -587,36 +658,35 @@ final class DeveloperAPI {
         sayo_buf_free(&csr)
         let b64 = csrDER.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed])
         let pem = "-----BEGIN CERTIFICATE REQUEST-----\n\(b64)\n-----END CERTIFICATE REQUEST-----\n"
-        let existing = try await call("listAllDevelopmentCerts", ["teamId": team])["certificates"] as? [[String: Any]] ?? []
-        for c in existing where (c["machineName"] as? String) == "SayoSign" {
-            if let serial = c["serialNumber"] as? String {
-                _ = try? await call("revokeDevelopmentCert", ["teamId": team, "serialNumber": serial])
-            }
-        }
         let submit: [String: Any]
         do {
             submit = try await call("submitDevelopmentCSR", ["teamId": team, "csrContent": pem,
-                                                              "machineId": anisette.deviceID.uppercased(), "machineName": "SayoSign"])
-        } catch {
-            if let oldest = existing.first, let serial = oldest["serialNumber"] as? String {
-                _ = try? await call("revokeDevelopmentCert", ["teamId": team, "serialNumber": serial])
-                return try await createCertificate(team: team, keyTag: keyTag)
-            }
-            throw error
+                                                              "machineId": UUID().uuidString.uppercased(),
+                                                              "machineName": DeveloperAPI.machineName])
+        } catch let e as DevServicesError where e.code == 7460 {
+            return .limitReached(existing.filter { ($0["serialNumber"] as? String)?.isEmpty == false })
         }
         let req = submit["certRequest"] as? [String: Any] ?? [:]
+        let requestID = req["certRequestId"] as? String ?? req["certificateId"] as? String
         let serial = req["serialNumber"] as? String
-        let certID = req["certificateId"] as? String
+        if let content = req["certContent"] as? Data { return .ready(content) }
         for _ in 0..<5 {
             let all = try await call("listAllDevelopmentCerts", ["teamId": team])["certificates"] as? [[String: Any]] ?? []
-            if let match = all.first(where: { ($0["serialNumber"] as? String) == serial || ($0["certificateId"] as? String) == certID }),
-               let content = match["certContent"] as? Data {
-                return content
+            if let match = all.first(where: { c in
+                (requestID != nil && (c["certificateId"] as? String) == requestID) || (serial != nil && (c["serialNumber"] as? String) == serial)
+                    || ((c["certContent"] as? Data).map { DeveloperAPI.publicKey(ofCertificate: $0) == pub } ?? false)
+            }), let content = match["certContent"] as? Data {
+                return .ready(content)
             }
-            if let content = req["certContent"] as? Data { return content }
             try await Task.sleep(nanoseconds: 1_500_000_000)
         }
         throw SayoError(L("Apple did not return the certificate"))
+    }
+
+    /// The certificate's public key in the same form as LocalCA.publicDER (PKCS#1 for RSA).
+    static func publicKey(ofCertificate der: Data) -> Data? {
+        guard let c = SecCertificateCreateWithData(nil, der as CFData), let k = SecCertificateCopyKey(c) else { return nil }
+        return SecKeyCopyExternalRepresentation(k, nil) as Data?
     }
 
     func profile(team: String, bundleID: String, name: String) async throws -> Data {
@@ -637,8 +707,25 @@ final class DeveloperAPI {
     }
 }
 
+/// Serial numbers as Apple lists them vs. as read from the certificate (case, colons, leading zeros).
+func sameSerial(_ a: String, _ b: String) -> Bool {
+    func norm(_ s: String) -> Substring { s.uppercased().replacingOccurrences(of: ":", with: "").drop { $0 == "0" } }
+    let x = norm(a), y = norm(b)
+    return !x.isEmpty && x == y
+}
+
 enum AppleAccount {
-    static func keyTag(_ id: UUID) -> Data { Data("dev.murk.sayosign.appleid.\(id.uuidString)".utf8) }
+    static func keyTag(_ id: UUID) -> Data {
+        // Certificates made since the iLoader-style sign-in share their Apple ID's key.
+        if let shared = Keychain.get("appleid.keytag." + id.uuidString) { return Data(shared.utf8) }
+        return Data("dev.murk.sayosign.appleid.\(id.uuidString)".utf8)
+    }
+
+    /// One signing key per Apple ID, reused across sign-ins (like iLoader).
+    static func accountKeyTag(_ email: String) -> String {
+        let h = Crypto.sha256(Data(email.lowercased().utf8)).map { String(format: "%02x", $0) }.joined()
+        return "dev.murk.sayosign.appleid.key." + h
+    }
 
     static func saveSession(_ s: AppleSession, for id: UUID) {
         if let d = try? JSONEncoder().encode(s), let str = String(data: d, encoding: .utf8) {
@@ -654,9 +741,15 @@ enum AppleAccount {
     static func profile(for cert: StoredCertificate, bundleID: String, name: String, anisetteURL: String) async throws -> (Data, String) {
         guard let s = session(for: cert.id) else { throw SayoError(L("Sign in to your Apple ID again")) }
         if s.expiry < Date() { throw SayoError(L("Your Apple ID session expired, sign in again")) }
-        let ani = try await Anisette.fetch(anisetteURL)
+        let ani = try await Anisette.fetch(s.anisette ?? anisetteURL)
         let api = DeveloperAPI(session: s, anisette: ani)
         let team = cert.profile.teamID
+        // Signing in again (here, on the desktop or in another sideloading tool) can revoke
+        // this certificate; a revoked one only shows up as "Unable to install" later.
+        let alive = try await api.call("listAllDevelopmentCerts", ["teamId": team])["certificates"] as? [[String: Any]] ?? []
+        if !alive.contains(where: { sameSerial(($0["serialNumber"] as? String) ?? "", cert.details.serial) }) {
+            throw SayoError(L("This Apple ID certificate was revoked, probably by signing in somewhere else. Delete it and sign in to your Apple ID again."))
+        }
         let finalID = bundleID.hasSuffix("." + team) ? bundleID : bundleID + "." + team
         let data = try await api.profile(team: team, bundleID: finalID, name: name)
         return (data, finalID)
@@ -680,6 +773,9 @@ struct AppleIDView: View {
     @State private var teams: [[String: Any]] = []
     @State private var session: AppleSession?
     @State private var anisette: Anisette?
+    @State private var revokeChoices: [[String: Any]] = []
+    @State private var revokeSelected: Set<String> = []
+    @State private var pendingTeam: [String: Any]?
 
     var body: some View {
         NavigationView {
@@ -705,8 +801,9 @@ struct AppleIDView: View {
                             }
                         }
                     }
-                    Section(header: Text("UDID"), footer: Text(L("Your iPhone UDID is needed to register it with Apple. Find it in Finder/iTunes or on a UDID website."))) {
+                    Section(header: Text("UDID"), footer: Text(L("Apple needs this iPhone's UDID. Tap Detect: Safari downloads a profile, open Settings → Profile Downloaded → Install, and you come back here with the UDID filled in."))) {
                         TextField("00008110-000000000000001E", text: $udid).autocapitalization(.allCharacters).disableAutocorrection(true)
+                        Button { detectUDID() } label: { Label(L("Detect UDID automatically"), systemImage: "iphone.radiowaves.left.and.right") }
                     }
                     Section {
                         Button { Task { await start() } } label: {
@@ -745,6 +842,39 @@ struct AppleIDView: View {
                         }
                     }
                 }
+                if step == 3 {
+                    Section(header: Text(L("Revoke certificates")),
+                            footer: Text(L("This Apple ID already has as many development certificates as Apple allows. Choose which to revoke; apps signed with a revoked certificate stop opening."))) {
+                        ForEach(revokeChoices.indices, id: \.self) { i in
+                            let c = revokeChoices[i]
+                            let serial = c["serialNumber"] as? String ?? ""
+                            Button {
+                                if revokeSelected.contains(serial) { revokeSelected.remove(serial) } else { revokeSelected.insert(serial) }
+                            } label: {
+                                HStack {
+                                    Image(systemName: revokeSelected.contains(serial) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundColor(revokeSelected.contains(serial) ? Theme.rose : .secondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(c["machineName"] as? String ?? c["name"] as? String ?? L("Certificate")).font(.subheadline.weight(.semibold))
+                                        Text(serial).font(.caption2.monospaced()).foregroundColor(.secondary)
+                                        if let d = c["expirationDate"] as? Date {
+                                            Text(LF("Expires %@", dateFormatter.string(from: d))).font(.caption2).foregroundColor(.secondary)
+                                        }
+                                    }
+                                }
+                            }
+                            .foregroundColor(.primary)
+                        }
+                    }
+                    Section {
+                        Button { Task { await revokeAndContinue() } } label: {
+                            HStack { if working { ProgressView().tint(.white) }; Text(L("Revoke and continue")) }
+                        }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(working || revokeSelected.isEmpty)
+                        .listRowBackground(Color.clear)
+                    }
+                }
                 if !log.isEmpty {
                     Section(header: Text(L("Progress"))) {
                         ForEach(log.indices, id: \.self) { i in
@@ -758,10 +888,46 @@ struct AppleIDView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("Close")) { dismiss() } } }
             .onAppear { udid = state.settings.udid }
+            .onReceive(NotificationCenter.default.publisher(for: .sayoUDID)) { n in
+                if let v = n.object as? String { udid = v }
+            }
         }
     }
 
     func add(_ s: String) { log.append(s) }
+
+    func revokeAndContinue() async {
+        guard let s = session, let ani = anisette, let team = pendingTeam, let teamID = team["teamId"] as? String else { return }
+        working = true
+        error = nil
+        do {
+            let api = DeveloperAPI(session: s, anisette: ani)
+            for serial in revokeSelected {
+                _ = try await api.call("revokeDevelopmentCert", ["teamId": teamID, "serialNumber": serial])
+            }
+            add(LF("Revoked %d certificate(s)", revokeSelected.count))
+        } catch {
+            self.error = error.localizedDescription
+            working = false
+            return
+        }
+        working = false
+        step = 2
+        await finish(team: team)
+    }
+
+    /// Like udid.tech, but served by SayoSign itself on 127.0.0.1: iOS installs nothing, it
+    /// posts this iPhone's UDID back to the app's server, which hands it to the app.
+    func detectUDID() {
+        let server = InstallServer.shared
+        do { try server.startPlain(port: state.settings.serverPort) } catch {
+            self.error = error.localizedDescription
+            return
+        }
+        server.keepAlive(true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 300) { server.keepAlive(false) }
+        if let u = URL(string: "\(server.httpBase)/udid.mobileconfig") { UIApplication.shared.open(u) }
+    }
 
     func start() async {
         working = true
@@ -812,7 +978,10 @@ struct AppleIDView: View {
         do {
             try await a.submitCode(code.trimmingCharacters(in: .whitespaces), r: r, kind: factor)
             add(L("Code accepted"))
+            // The trusted session only exists after signing in again.
             let again = try await a.login()
+            if again.needs2FA != nil { throw SayoError(L("Apple still asks for a code. Try signing in again.")) }
+            login = again
             try await afterLogin(again)
         } catch {
             self.error = error.localizedDescription
@@ -845,8 +1014,22 @@ struct AppleIDView: View {
             try await api.ensureDevice(team: teamID, udid: state.settings.udid)
             add(L("Device registered"))
             let id = UUID()
-            let der = try await api.createCertificate(team: teamID, keyTag: AppleAccount.keyTag(id))
-            add(L("Certificate created"))
+            let tag = AppleAccount.accountKeyTag(s.email)
+            let key = try LocalCA.key(tag: Data(tag.utf8)) ?? LocalCA.makeKey(tag: Data(tag.utf8))
+            let der: Data
+            switch try await api.obtainCertificate(team: teamID, key: key) {
+            case .ready(let d):
+                der = d
+            case .limitReached(let existing):
+                // Like iLoader: show the account's certificates and let the user choose.
+                revokeChoices = existing
+                revokeSelected = []
+                pendingTeam = team
+                step = 3
+                return
+            }
+            Keychain.set(tag, for: "appleid.keytag." + id.uuidString)
+            add(L("Certificate ready"))
             guard let details = SayoCore.certDetails(der) else { throw SayoError(L("Invalid certificate")) }
             let dir = Paths.certificates.appendingPathComponent(id.uuidString, isDirectory: true)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -870,4 +1053,176 @@ struct AppleIDView: View {
             self.error = error.localizedDescription
         }
     }
+}
+
+/// Certificates and devices of the Apple ID account behind a SayoSign certificate:
+/// revoke development certificates, remove or add device UDIDs.
+struct AppleAccountView: View {
+    @EnvironmentObject var state: AppState
+    @Environment(\.dismiss) var dismiss
+    let cert: StoredCertificate
+    @State private var api: DeveloperAPI?
+    @State private var certs: [[String: Any]] = []
+    @State private var devices: [[String: Any]] = []
+    @State private var loading = false
+    @State private var error: String?
+    @State private var newName = ""
+    @State private var newUDID = ""
+    @State private var revokeSerial: String?
+    @State private var removeDevice: [String: Any]?
+
+    var team: String { cert.profile.teamID }
+
+    var body: some View {
+        NavigationView {
+            Form {
+                if let e = error { Section { Text(e).foregroundColor(.red) } }
+                Section(header: Text(L("Certificates")),
+                        footer: Text(L("Free accounts can have only two development certificates. A revoked certificate stops working for every app signed with it."))) {
+                    if certs.isEmpty && !loading { Text(L("No certificates")).foregroundColor(.secondary) }
+                    ForEach(certs.indices, id: \.self) { i in
+                        let c = certs[i]
+                        let serial = c["serialNumber"] as? String ?? ""
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(c["machineName"] as? String ?? c["name"] as? String ?? L("Certificate")).font(.subheadline.weight(.semibold))
+                                Text(serial).font(.caption2.monospaced()).foregroundColor(.secondary)
+                                if let d = c["expirationDate"] as? Date {
+                                    Text(LF("Expires %@", dateFormatter.string(from: d))).font(.caption2).foregroundColor(.secondary)
+                                }
+                                if isMine(serial) { Text(L("Used by this SayoSign certificate")).font(.caption2).foregroundColor(Theme.rose) }
+                            }
+                            Spacer()
+                            Button(L("Revoke"), role: .destructive) { revokeSerial = serial }
+                                .buttonStyle(SmallButtonStyle(filled: false))
+                                .disabled(loading || serial.isEmpty)
+                        }
+                    }
+                }
+                Section(header: Text(L("Devices")),
+                        footer: Text(L("Apps signed with this account install only on these devices."))) {
+                    if devices.isEmpty && !loading { Text(L("No devices")).foregroundColor(.secondary) }
+                    ForEach(devices.indices, id: \.self) { i in
+                        let d = devices[i]
+                        let udid = d["deviceNumber"] as? String ?? ""
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(d["name"] as? String ?? "iPhone").font(.subheadline.weight(.semibold))
+                                Text(udid).font(.caption2.monospaced()).foregroundColor(.secondary).textSelection(.enabled)
+                                if udid.uppercased() == state.settings.udid.uppercased() && !udid.isEmpty {
+                                    Text(L("This iPhone")).font(.caption2).foregroundColor(Theme.rose)
+                                }
+                            }
+                            Spacer()
+                            Button(L("Remove"), role: .destructive) { removeDevice = d }
+                                .buttonStyle(SmallButtonStyle(filled: false))
+                                .disabled(loading)
+                        }
+                    }
+                }
+                Section(header: Text(L("Add device"))) {
+                    TextField(L("Name"), text: $newName)
+                    TextField("00008110-000000000000001E", text: $newUDID)
+                        .autocapitalization(.allCharacters).disableAutocorrection(true)
+                    Button(L("Add")) { Task { await addDevice() } }
+                        .disabled(loading || newUDID.trimmingCharacters(in: .whitespaces).count < 20)
+                }
+            }
+            .navigationTitle(L("Apple ID account"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(L("Close")) { dismiss() } }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if loading { ProgressView() } else {
+                        Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }
+                    }
+                }
+            }
+            .confirmationDialog(L("Revoke this certificate?"), isPresented: Binding(get: { revokeSerial != nil }, set: { if !$0 { revokeSerial = nil } }),
+                                titleVisibility: .visible) {
+                Button(L("Revoke"), role: .destructive) {
+                    let s = revokeSerial
+                    revokeSerial = nil
+                    if let s = s { Task { await revoke(s) } }
+                }
+            } message: {
+                Text(isMine(revokeSerial ?? "") ? L("SayoSign signs with this certificate. After revoking, sign in to your Apple ID again.") : L("Apps signed with it will stop opening."))
+            }
+            .confirmationDialog(L("Remove this device?"), isPresented: Binding(get: { removeDevice != nil }, set: { if !$0 { removeDevice = nil } }),
+                                titleVisibility: .visible) {
+                Button(L("Remove"), role: .destructive) {
+                    let d = removeDevice
+                    removeDevice = nil
+                    if let d = d { Task { await remove(d) } }
+                }
+            }
+            .task { await reload() }
+        }
+    }
+
+    func isMine(_ serial: String) -> Bool { sameSerial(serial, cert.details.serial) }
+
+    func connect() async throws -> DeveloperAPI {
+        if let a = api { return a }
+        guard let s = AppleAccount.session(for: cert.id) else { throw SayoError(L("Sign in to your Apple ID again")) }
+        if s.expiry < Date() { throw SayoError(L("Your Apple ID session expired, sign in again")) }
+        let ani = try await Anisette.fetch(s.anisette ?? state.settings.anisetteURL)
+        let a = DeveloperAPI(session: s, anisette: ani)
+        api = a
+        return a
+    }
+
+    func run(_ work: (DeveloperAPI) async throws -> Void) async {
+        loading = true
+        error = nil
+        defer { loading = false }
+        do { try await work(try await connect()) } catch { self.error = error.localizedDescription }
+    }
+
+    func reload() async {
+        await run { a in
+            certs = try await a.call("listAllDevelopmentCerts", ["teamId": team])["certificates"] as? [[String: Any]] ?? []
+            devices = try await a.call("listDevices", ["teamId": team])["devices"] as? [[String: Any]] ?? []
+        }
+    }
+
+    func revoke(_ serial: String) async {
+        await run { a in
+            _ = try await a.call("revokeDevelopmentCert", ["teamId": team, "serialNumber": serial])
+            state.show(L("Certificate revoked"))
+        }
+        await reload()
+    }
+
+    func remove(_ d: [String: Any]) async {
+        guard let id = d["deviceId"] as? String else { error = L("Apple did not send this device's ID"); return }
+        await run { a in
+            _ = try await a.call("deleteDevice", ["teamId": team, "deviceId": id])
+            state.show(L("Device removed"))
+        }
+        await reload()
+    }
+
+    func addDevice() async {
+        let udid = newUDID.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        await run { a in
+            _ = try await a.call("addDevice", ["teamId": team, "deviceNumber": udid, "name": name.isEmpty ? "iPhone" : name])
+            state.show(L("Device added"))
+            newUDID = ""
+            newName = ""
+        }
+        await reload()
+    }
+}
+
+extension Notification.Name {
+    static let sayoUDID = Notification.Name("dev.murk.sayosign.udid")
+}
+
+/// An error from Apple's developer services, with its result code (7460: certificate limit).
+struct DevServicesError: LocalizedError {
+    let code: Int
+    let message: String
+    var errorDescription: String? { "\(message) (\(code))" }
 }

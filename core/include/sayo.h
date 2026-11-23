@@ -134,6 +134,14 @@ int sayo_aes_gcm_decrypt(const uint8_t *key, size_t keylen, const uint8_t *iv, s
 void sayo_hmac_sha256(const uint8_t *key, size_t kl, const uint8_t *msg, size_t ml, uint8_t out[32]);
 void sayo_pbkdf2_sha256(const uint8_t *pw, size_t pl, const uint8_t *salt, size_t sl, uint32_t iter, uint8_t *out, size_t ol);
 
+/* Reads a .p12 (PBES2/AES or unencrypted bags, SHA-1/SHA-256 MAC) into the certificate DER
+ * and the RSA private key (PKCS#1 DER). Returns 0, -2 for a wrong password, -1 otherwise. */
+int sayo_p12_parse(const uint8_t *p12, size_t n, const char *password, sayo_buf *cert_der, sayo_buf *rsa_key);
+
+/* LiveContainer-style: turns an app's main executable (thin or fat) into a loadable dylib in
+ * place (MH_EXECUTE -> MH_DYLIB, __PAGEZERO moved to 0xFFFFC000/0x4000). Call before signing. */
+int sayo_macho_make_dylib(const char *path);
+
 const char *sayo_last_error(void);
 void sayo_set_error(const char *fmt, ...);
 
