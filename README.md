@@ -31,7 +31,11 @@
 - **Offline installs.** A tiny HTTPS server on `localhost` and `itms-services` install the app. Trust comes from a certificate authority generated on your device; its private key never leaves the phone, so there are no leaked keys and no third-party servers.
 - **Sources.** AltStore, SideStore, Feather and ESign repositories with search, screenshots and one-tap download.
 - **App tweaks.** Change the name, bundle ID, version, icon and minimum iOS. You can also remove extensions, Watch apps or URL schemes, enable Files sharing, and add extra entitlements.
-- **Interface.** Clean ESign-style tabs, **Light / Black / System** themes, Liquid Glass on iOS 26+, English, Russian and Simplified Chinese.
+- **Interface.** A premium "Ink & Ribbon" design with layered warm surfaces, Liquid Glass on iOS 26+, Light / Dark / System appearance, and 12 languages with full Arabic RTL: English, العربية, Français, Português, 简体中文, 繁體中文, Español, Deutsch, Русский, 日本語, Türkçe and Italiano.
+
+## 🎨 Design
+
+The 2026 interface redesign — visual system, motion, localization and app icon — is by [@abdulmajeedG](https://t.me/abdulmajeedG) on Telegram. SayoSign remains the original project by murk.
 
 ## 🍎 Apple ID and anisette in 2026
 

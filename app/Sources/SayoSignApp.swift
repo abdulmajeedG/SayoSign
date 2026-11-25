@@ -4,15 +4,51 @@ import UniformTypeIdentifiers
 struct SayoSignApp: App {
     @StateObject private var state = AppState.shared
     @StateObject private var certImport = CertificateImportCoordinator.shared
+    @ObservedObject private var localization = LocalizationManager.shared
 
     var body: some Scene {
         WindowGroup {
+            AppShell(state: state, certImport: certImport, localization: localization)
+                .tint(Theme.rose)
+                .preferredColorScheme(state.settings.appearance == 1 ? .light : state.settings.appearance == 2 ? .dark : nil)
+                .environment(\.locale, localization.locale)
+                .environment(\.layoutDirection, localization.layoutDirection)
+                .onOpenURL { state.handleOpen($0) }
+        }
+    }
+}
+
+private struct AppShell: View {
+    @ObservedObject var state: AppState
+    @ObservedObject var certImport: CertificateImportCoordinator
+    @ObservedObject var localization: LocalizationManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showLaunch = true
+
+    var body: some View {
+        ZStack {
             RootView()
                 .environmentObject(state)
                 .environmentObject(certImport)
-                .tint(Theme.rose)
-                .preferredColorScheme(state.settings.appearance == 1 ? .light : state.settings.appearance == 2 ? .dark : nil)
-                .onOpenURL { state.handleOpen($0) }
+                .id(localization.revision)
+                .opacity(showLaunch ? 0 : 1)
+
+            if showLaunch {
+                LaunchExperienceView()
+                    .transition(.opacity.combined(with: .scale(scale: 1.015)))
+                    .zIndex(100)
+            }
+        }
+        .onAppear {
+            guard showLaunch else { return }
+            guard !reduceMotion else {
+                showLaunch = false
+                return
+            }
+            // The signing engine and inbox scan already run behind this overlay.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.65) {
+                withAnimation(.easeInOut(duration: 0.55)) { showLaunch = false }
+            }
         }
     }
 }
@@ -21,6 +57,7 @@ struct RootView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var certImport: CertificateImportCoordinator
     @Environment(\.scenePhase) var phase
+    @Environment(\.colorScheme) var scheme
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -38,26 +75,31 @@ struct RootView: View {
                     .tabItem { Label(L("Settings"), systemImage: "gearshape.fill") }
                     .tag(3)
             }
+            .tint(Theme.rose)
+
             if let t = state.toast {
                 ToastView(text: t)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .padding(.top, 8)
                     .onTapGesture { state.toast = nil }
                     .zIndex(10)
+                    .accessibilityAction(named: L("Dismiss")) { state.toast = nil }
             }
             if let b = state.busy {
                 HStack(spacing: 10) {
-                    ProgressView()
-                    Text(b).font(.subheadline.weight(.semibold))
+                    ProgressView().tint(Theme.coral)
+                    Text(b).font(SayoType.captionStrong)
+                        .foregroundColor(Theme.textPrimary)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
-                .glassy()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .glassPanelCompat()
                 .padding(.top, 8)
                 .zIndex(9)
             }
         }
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: state.toast)
+        .animation(.spring(response: 0.45, dampingFraction: 0.82), value: state.toast)
+        .animation(.easeInOut(duration: 0.25), value: state.busy)
         .sheet(isPresented: $certImport.presented) {
             ImportCertificateView(prefillP12: certImport.p12, prefillProfile: certImport.profile)
                 .environmentObject(state)

@@ -6,3 +6,12 @@ build/
 DerivedData/
 *.xcodeproj/
 compile_flags.txt
+
+app/Generated/
+rust/sayoidev/Cargo.lock
+
+app/Info.plist
+*.xcresult
+
+DerivedData*/
+dist/
