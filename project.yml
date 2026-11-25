@@ -35,9 +35,9 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDevelopmentRegion: en
-        CFBundleLocalizations: [en, ru, zh-Hans]
+        CFBundleLocalizations: [en, ar, fr, pt, zh-Hans, zh-Hant, es, de, ru, ja, tr, it]
         UILaunchScreen:
-          UIColorName: AccentColor
+          UIColorName: LaunchBackground
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
@@ -99,6 +99,7 @@ targets:
         HEADER_SEARCH_PATHS: ["$(SRCROOT)/core/include", "$(SRCROOT)/core/src"]
         OTHER_LDFLAGS: ["-lz", "-lcompression", "-lsayoidev", "-framework", "Security"]
         LIBRARY_SEARCH_PATHS: ["$(SRCROOT)/rust/sayoidev/target/aarch64-apple-ios/release"]
+        "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]": ["$(SRCROOT)/rust/sayoidev/target/aarch64-apple-ios-sim/release"]
         GCC_WARN_INHIBIT_ALL_WARNINGS: "YES"
         CLANG_ENABLE_MODULES: "YES"
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: "YES"
@@ -109,11 +110,11 @@ targets:
   CydiaSubstrate:
     type: framework
     platform: iOS
-    deploymentTarget: "12.0"
+    deploymentTarget: "15.0"
     sources:
       - path: hook/SayoHook.c
     info:
-      path: hook/Info.plist
+      path: app/Generated/CydiaSubstrate-Info.plist
       properties:
         CFBundleExecutable: CydiaSubstrate
         CFBundleIdentifier: dev.sayosign.hook
@@ -121,7 +122,7 @@ targets:
         CFBundlePackageType: FMWK
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
-        MinimumOSVersion: "12.0"
+        MinimumOSVersion: "15.0"
     settings:
       base:
         PRODUCT_NAME: CydiaSubstrate
@@ -132,3 +133,37 @@ targets:
         GCC_SYMBOLS_PRIVATE_EXTERN: "YES"
         DEFINES_MODULE: "NO"
         SKIP_INSTALL: "YES"
+
+  SayoSignUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: app/UITests
+    dependencies:
+      - target: SayoSign
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.murk.sayosign.uitests
+        TEST_TARGET_NAME: SayoSign
+        GENERATE_INFOPLIST_FILE: "YES"
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+
+schemes:
+  SayoSign:
+    build:
+      targets:
+        SayoSign: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - SayoSignUITests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

@@ -29,7 +29,7 @@
 - **离线安装。** 通过 `localhost` 上的小型 HTTPS 服务器和 `itms-services` 安装应用。信任来自设备上生成的证书颁发机构，私钥永不离开手机：没有泄露的密钥，也没有第三方服务器。
 - **软件源。** 支持 AltStore、SideStore、Feather 和 ESign 源，可搜索、看截图、一键下载。
 - **应用修改。** 修改名称、Bundle ID、版本、图标和最低 iOS；移除扩展、Watch 应用或 URL Scheme；启用文件共享；添加额外权限。
-- **界面。** 粉珊瑚色设计配小蝴蝶结 🎀，iOS 26+ 支持 Liquid Glass，浅色 / 黑色 / 跟随系统主题，支持英文、俄文和简体中文。
+- **界面。** 全新“Ink & Ribbon”高级设计，采用多层质感表面，iOS 26+ 支持 Liquid Glass，提供浅色 / 深色 / 跟随系统主题，以及 12 种语言（含阿拉伯语 RTL）。
 
 ## 🍎 2026 年的 Apple ID 与 Anisette
 

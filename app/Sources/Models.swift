@@ -2,11 +2,11 @@ import Foundation
 import SwiftUI
 
 func L(_ key: String) -> String {
-    NSLocalizedString(key, comment: "")
+    LocalizationManager.shared.string(key)
 }
 
 func LF(_ key: String, _ args: CVarArg...) -> String {
-    String(format: NSLocalizedString(key, comment: ""), arguments: args)
+    String(format: LocalizationManager.shared.string(key), arguments: args)
 }
 
 struct LibraryApp: Codable, Identifiable, Hashable {

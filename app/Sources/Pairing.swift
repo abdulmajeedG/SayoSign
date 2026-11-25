@@ -157,6 +157,9 @@ final class PairingHost: NSObject, ObservableObject, NetServiceDelegate {
     }
 }
 
+
+// MARK: - Pairing UI (PairingHost and install logic live above)
+
 struct PairingView: View {
     @EnvironmentObject var state: AppState
     @Environment(\.dismiss) var dismiss
@@ -168,64 +171,259 @@ struct PairingView: View {
 
     var body: some View {
         NavigationView {
-            Form {
-                Section(footer: Text(L("Pairing lets SayoSign install apps the way SideStore does, including apps signed with a free Apple ID. It needs iOS 27, Developer Mode and LocalDevVPN (free on the App Store) connected while installing."))) {
-                    HStack {
-                        Image(systemName: paired ? "checkmark.seal.fill" : "link.badge.plus")
-                            .foregroundColor(paired ? .green : Theme.rose).font(.title2)
-                        Text(paired ? L("This iPhone is paired") : L("Not paired yet")).font(.headline)
+            ZStack {
+                SayoBackground(accent: Theme.mint)
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 16) {
+                        topBar
+                        hero
+                        pairingPanel
+                        importPanel
+                        if paired { connectionPanel }
                     }
-                }
-                Section(header: Text(L("Pair on this iPhone (iOS 27)"))) {
-                    if host.running {
-                        if let p = host.pin {
-                            Text(p).font(.system(size: 44, weight: .bold, design: .monospaced)).frame(maxWidth: .infinity)
-                                .textSelection(.enabled)
-                            Button { UIPasteboard.general.string = p; state.show(L("Code copied")) } label: {
-                                Label(L("Copy code"), systemImage: "doc.on.doc")
-                            }
-                        } else {
-                            HStack { ProgressView(); Text(host.state).font(.subheadline) }
-                        }
-                        if host.pin != nil { Text(host.state).font(.caption).foregroundColor(.secondary) }
-                        Button(L("Open Settings")) { if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) } }
-                        Button(L("Cancel"), role: .destructive) { host.stop() }
-                    } else {
-                        Button { host.start() } label: { Label(L("Pair this iPhone"), systemImage: "iphone.and.arrow.forward") }
-                        Text(L("Tap Pair, then open Settings → Privacy & Security → Developer Mode → Pair with SayoSign and type the code shown here."))
-                            .font(.caption).foregroundColor(.secondary)
-                    }
-                    if let e = host.error { Text(e).foregroundColor(.red).font(.caption) }
-                }
-                Section(header: Text(L("Or import a pairing file")), footer: Text(L("An RPPairing file from StikDebug or PhonePair works too."))) {
-                    Button { pick() } label: { Label(L("Import pairing file"), systemImage: "doc.badge.plus") }
-                }
-                if paired {
-                    Section(header: Text(L("Connection")), footer: Text(L("Turn LocalDevVPN on, then check."))) {
-                        HStack {
-                            Text(L("Address"))
-                            Spacer()
-                            TextField("10.7.0.1", text: $state.settings.tunnelAddress).multilineTextAlignment(.trailing)
-                                .keyboardType(.numbersAndPunctuation).autocapitalization(.none).disableAutocorrection(true)
-                        }
-                        Button { Task { await check() } } label: {
-                            HStack { Label(L("Check connection"), systemImage: "bolt.horizontal"); Spacer(); if checking { ProgressView() } }
-                        }
-                        .disabled(checking)
-                        if let r = checkResult { Text(r).font(.caption).foregroundColor(.secondary) }
-                        if let u = URL(string: "https://apps.apple.com/search?term=LocalDevVPN") {
-                            Link(destination: u) { Label(L("Get LocalDevVPN"), systemImage: "lock.shield") }
-                        }
-                        Button(L("Forget pairing"), role: .destructive) { DeviceLink.forget(); paired = false; checkResult = nil }
-                    }
+                    .padding(.horizontal, Theme.Space.screen)
+                    .padding(.top, 8)
+                    .padding(.bottom, 40)
                 }
             }
-            .navigationTitle(L("Pairing"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("Close")) { host.stop(); dismiss() } } }
-            .onChange(of: host.done) { d in if d { paired = true; state.show(L("This iPhone is paired")) } }
+            .navigationBarHidden(true)
+            .onChange(of: host.done) { d in
+                if d {
+                    paired = true
+                    state.show(L("This iPhone is paired"))
+                    Haptics.success()
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    private var topBar: some View {
+        HStack {
+            Button {
+                Haptics.light()
+                host.stop()
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(Theme.textPrimary)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(Theme.surface).overlay(Circle().stroke(Theme.border, lineWidth: 0.7)))
+            }
+            .accessibilityLabel(L("Close"))
+            .accessibilityIdentifier("pair.close")
+            Spacer()
+            Text(L("Pairing"))
+                .font(.system(.headline, design: .rounded).weight(.semibold))
+                .foregroundColor(Theme.textPrimary)
+            Spacer()
+            BrandMark(size: 34)
         }
     }
+
+    private var hero: some View {
+        VStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(paired ? Theme.success.opacity(0.11) : Theme.mint.opacity(0.11))
+                    .frame(width: 90, height: 90)
+                Circle()
+                    .stroke(paired ? Theme.success.opacity(0.18) : Theme.mint.opacity(0.16), lineWidth: 1)
+                    .frame(width: 68, height: 68)
+                Image(systemName: paired ? "checkmark.seal.fill" : "link.badge.plus")
+                    .font(.system(size: 34, weight: .medium))
+                    .foregroundColor(paired ? Theme.success : Theme.mint)
+            }
+            VStack(spacing: 4) {
+                Text(paired ? L("This iPhone is paired") : L("Not paired yet"))
+                    .font(SayoType.title)
+                    .foregroundColor(Theme.textPrimary)
+                Text(L("Pairing lets SayoSign install apps the way SideStore does, including apps signed with a free Apple ID. It needs iOS 27, Developer Mode and LocalDevVPN (free on the App Store) connected while installing."))
+                    .font(SayoType.caption)
+                    .foregroundColor(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+            }
+        }
+        .padding(.top, 6)
+    }
+
+    private var pairingPanel: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            SectionLabel(title: L("Pair on this iPhone (iOS 27)"))
+            VStack(spacing: 13) {
+                if host.running {
+                    if let p = host.pin {
+                        VStack(spacing: 7) {
+                            Text(p)
+                                .font(.system(size: 42, weight: .bold, design: .monospaced))
+                                .tracking(6)
+                                .foregroundColor(Theme.textPrimary)
+                                .frame(maxWidth: .infinity)
+                                .textSelection(.enabled)
+                            Text(host.state)
+                                .font(SayoType.caption)
+                                .foregroundColor(Theme.textSecondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                                .fill(Theme.surfaceInset.opacity(0.55))
+                        )
+                        HStack(spacing: 9) {
+                            Button {
+                                UIPasteboard.general.string = p
+                                state.show(L("Code copied"))
+                                Haptics.selection()
+                            } label: {
+                                Label(L("Copy code"), systemImage: "doc.on.doc")
+                            }
+                            .buttonStyle(SmallButtonStyle(filled: false))
+                            Button {
+                                Haptics.light()
+                                if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) }
+                            } label: {
+                                Label(L("Open Settings"), systemImage: "gear")
+                            }
+                            .buttonStyle(SmallButtonStyle())
+                        }
+                    } else {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(host.state)
+                                .font(SayoType.subheadline)
+                                .foregroundColor(Theme.textSecondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Button(role: .destructive) {
+                        Haptics.warning()
+                        host.stop()
+                    } label: {
+                        Text(L("Cancel"))
+                            .font(SayoType.captionStrong)
+                            .foregroundColor(Theme.danger)
+                    }
+                } else {
+                    Button {
+                        Haptics.medium()
+                        host.start()
+                    } label: {
+                        Label(L("Pair this iPhone"), systemImage: "iphone.and.arrow.forward")
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    Text(L("Tap Pair, then open Settings → Privacy & Security → Developer Mode → Pair with SayoSign and type the code shown here."))
+                        .font(SayoType.micro)
+                        .foregroundColor(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let e = host.error {
+                    BannerView(kind: .error, text: e)
+                }
+            }
+            .padding(15)
+            .background(panel)
+        }
+    }
+
+    private var importPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionLabel(title: L("Or import a pairing file"),
+                         subtitle: L("An RPPairing file from StikDebug or PhonePair works too."))
+            Button { pick() } label: {
+                HStack(spacing: 12) {
+                    IconBadge(symbol: "doc.badge.plus", tint: Theme.lilac, size: 34)
+                    Text(L("Import pairing file"))
+                        .font(SayoType.bodyStrong)
+                        .foregroundColor(Theme.textPrimary)
+                    Spacer()
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 17))
+                        .foregroundColor(Theme.coral)
+                }
+                .padding(13)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                        .fill(Theme.surface)
+                        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous).stroke(Theme.border, lineWidth: 0.7))
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressableStyle())
+        }
+    }
+
+    private var connectionPanel: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            SectionLabel(title: L("Connection"), subtitle: L("Turn LocalDevVPN on, then check."))
+            VStack(alignment: .leading, spacing: 11) {
+                SayoTextField(title: L("Address"), placeholder: "10.7.0.1", text: $state.settings.tunnelAddress,
+                              keyboard: .numbersAndPunctuation, capitalization: .never)
+                Button {
+                    Haptics.light()
+                    Task { await check() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Label(L("Check connection"), systemImage: "bolt.horizontal")
+                        Spacer()
+                        if checking { ProgressView().scaleEffect(0.8) }
+                    }
+                    .font(SayoType.captionStrong)
+                    .foregroundColor(Theme.textPrimary)
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous).fill(Theme.surfaceInset.opacity(0.55)))
+                }
+                .buttonStyle(.plain)
+                .disabled(checking)
+                if let r = checkResult {
+                    Text(r)
+                        .font(SayoType.caption)
+                        .foregroundColor(r.hasPrefix("✓") ? Theme.success : Theme.danger)
+                }
+                if let u = URL(string: "https://apps.apple.com/search?term=LocalDevVPN") {
+                    Link(destination: u) {
+                        HStack(spacing: 8) {
+                            IconBadge(symbol: "lock.shield.fill", tint: Theme.info, size: 32)
+                            Text(L("Get LocalDevVPN"))
+                                .font(SayoType.bodyStrong)
+                                .foregroundColor(Theme.textPrimary)
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(Theme.textTertiary)
+                        }
+                        .padding(.vertical, 6)
+                    }
+                }
+                DividerSoft()
+                Button(role: .destructive) {
+                    Haptics.warning()
+                    DeviceLink.forget()
+                    paired = false
+                    checkResult = nil
+                } label: {
+                    Label(L("Forget pairing"), systemImage: "trash")
+                        .font(SayoType.captionStrong)
+                        .foregroundColor(Theme.danger)
+                }
+                .padding(.vertical, 5)
+            }
+            .padding(15)
+            .background(panel)
+        }
+    }
+
+    private var panel: some View {
+        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+            .fill(Theme.surface)
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).stroke(Theme.border, lineWidth: 0.7))
+    }
+
+    // MARK: - Logic (unchanged)
 
     func pick() {
         FilePicker.shared.pick([.item], multiple: false) { urls in
@@ -235,8 +433,10 @@ struct PairingView: View {
                 try? FileManager.default.removeItem(at: u)
                 paired = true
                 state.show(L("Pairing file imported"))
+                Haptics.success()
             } catch {
                 host.error = error.localizedDescription
+                Haptics.error()
             }
         }
     }
@@ -246,8 +446,10 @@ struct PairingView: View {
         defer { checking = false }
         do {
             checkResult = "✓ " + (try await DeviceLink.check(address: state.settings.tunnelAddress, port: 49152))
+            Haptics.success()
         } catch {
             checkResult = "✗ " + error.localizedDescription
+            Haptics.error()
         }
     }
 }
